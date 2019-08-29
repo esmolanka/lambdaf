@@ -1,0 +1,7 @@
+resolver: lts-14.0
+
+packages:
+- '.'
+
+extra-deps:
+- fastsum-0.1.1.0@sha256:bbc8c27b6dc100a94cef28ab1bebe38155cd95e00e8d27e025a137c8b74118e2,2280

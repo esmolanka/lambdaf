@@ -1,0 +1,26 @@
+name:                lambdaf
+version:             0.0.0.1
+-- synopsis:
+-- description:
+-- homepage:
+license:             BSD3
+license-file:        LICENSE
+author:              Eugene Smolanka
+maintainer:          esmolanka@gmail.com
+copyright:           Eugene Smolanka
+category:            Language
+build-type:          Simple
+extra-source-files:  README.md
+cabal-version:       >=1.10
+
+library
+  build-tools:         alex, happy
+  hs-source-dirs:      .
+  ghc-options:         -Wall -fno-warn-name-shadowing -fno-warn-unused-do-bind
+  exposed-modules:
+    Expr
+    Anf
+  build-depends:
+    base >= 4.7 && < 5, prettyprinter, containers, mtl,
+    text, recursion-schemes, fastsum, fused-effects
+  default-language:    Haskell2010
