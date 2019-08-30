@@ -16,7 +16,6 @@ module Anf where
 import Prelude hiding ((**))
 
 import Control.Effect.Carrier
-import Control.Effect.Pure
 import Control.Effect.Error
 import Control.Effect.Reader
 import Control.Effect.State
@@ -29,7 +28,7 @@ import qualified Data.Set as S
 import Data.Sum
 
 import Expr
-import Base (BaseValue(..), BasePrim(..), prim, lit, (**))
+import Base (BaseValue(..))
 import Utils
 
 data AnfValue e
@@ -170,22 +169,6 @@ eapply newprim lhs rhs = do
 
 ----------------------------------------------------------------------
 
-newtype AnfEval a = AnfEval
-  {unAnfEval :: ErrorC String (ReaderC (M.Map Var (Value '[LambdaValue AnfEval, BaseValue, AnfValue])) (StateC EVar PureC)) a
-  } deriving ( Functor, Applicative, Monad )
-
-instance Carrier (Error String :+: Reader (M.Map Var (Value '[LambdaValue AnfEval, BaseValue, AnfValue])) :+: State EVar :+: Pure) AnfEval where
-  eff x = AnfEval $ eff (hmap unAnfEval x)
-
-runAnfEval :: AnfEval a -> Either String a
-runAnfEval k = runPureC . evalState 100 . runReader M.empty . runError . unAnfEval $ k
-
-anfeval' :: Expr '[BasePrim, AnfPrim] -> AnfEval (Value '[LambdaValue AnfEval, BaseValue, AnfValue])
-anfeval' a = eval a
-
-----------------------------------------------------------------------
--- Example
-
 cnst :: (AnfPrim :<< p) => Expr p -> Expr p
 cnst x = Fix (Prim (inject' EConst)) ! x
 
@@ -194,21 +177,3 @@ eadd x y = Fix (Prim (inject' (EPrim EAdd))) ! x ! y
 
 loop :: (AnfPrim :<< p) => Expr p -> Expr p
 loop x = Fix (Prim (inject' ELoop)) ! x
-
-----------------------------------------------------------------------
-
-test1 :: Expr '[BasePrim, AnfPrim]
-test1 =
-  let_ 0 (lit (-3.14))
-  $ let_ 1 (prim Add ! lit 10 ! var 0)
-  $ let_ 2 (cnst (var 1))
-  $ let_ 3 (var 2 `eadd` var 2)
-  $ var 2 `eadd` (prim If ! var 0 ! var 2 ! var 3)
-
-test2 :: Expr '[BasePrim, AnfPrim]
-test2 =
-  loop $ lam 1 $
-    loop $ lam 2 $
-      var 1 **
-      var 2 **
-      cnst (lit 30)

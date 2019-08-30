@@ -21,6 +21,10 @@ library
     Expr
     Anf
     Utils
+    Base
+    IO
+    Record
+    Main
   build-depends:
     base >= 4.7 && < 5, prettyprinter, containers, mtl,
     text, recursion-schemes, fastsum, fused-effects

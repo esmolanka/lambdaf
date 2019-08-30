@@ -13,14 +13,12 @@
 module Base where
 
 import Control.Effect.Carrier
-import Control.Effect.Pure
 import Control.Effect.Error
-import Control.Effect.Reader
 
+import Data.Text
 import Data.Functor.Classes
 import Data.Functor.Const
 import Data.Functor.Foldable (Fix (..), unfix)
-import qualified Data.Map as M
 import Data.Sum
 
 import Expr
@@ -31,15 +29,20 @@ data BasePrim
   | If
   | MkPair
   | MkDouble Double
+  | MkText Text
   | MkUnit
 
 data BaseValue e
   = VDbl Double
+  | VText Text
   | VPair e e
   | VUnit
 
 mkVDbl :: (BaseValue :< v) => Double -> Value v
 mkVDbl x = Fix . inject $ VDbl x
+
+mkVText :: (BaseValue :< v) => Text -> Value v
+mkVText x = Fix . inject $ VText x
 
 mkVPair :: (BaseValue :< v) => Value v -> Value v -> Value v
 mkVPair a b = Fix . inject $ VPair a b
@@ -50,6 +53,7 @@ mkVUnit = Fix . inject $ VUnit
 instance Show1 BaseValue where
   liftShowsPrec sp _sl _n = \case
     VDbl x    -> showString "#" . shows x
+    VText x   -> shows x
     VPair a b -> showString "(" . sp 0 a . showString " ** " . sp 0 b . showString ")"
     VUnit     -> showString "Unit"
 
@@ -87,25 +91,13 @@ instance ( Member (Error String) sig
       Const (MkDouble n) ->
         pure $ mkVDbl n
 
+      Const (MkText t) ->
+        pure $ mkVText t
+
       Const MkUnit ->
         pure $ mkVUnit
     where
       projBase = project @BaseValue . unfix
-
-----------------------------------------------------------------------
-
-newtype Eval a = Eval
-  { unEval :: ErrorC String (ReaderC (M.Map Var (Value '[LambdaValue Eval, BaseValue])) PureC) a
-  } deriving (Functor, Applicative, Monad)
-
-instance (Monad Eval) => Carrier (Error String :+: Reader (M.Map Var (Value '[LambdaValue Eval, BaseValue])) :+: Pure) Eval where
-  eff x = Eval $ eff (hmap unEval x)
-
-runEval :: Eval a -> Either String a
-runEval k = runPureC . runReader M.empty . runError . unEval $ k
-
-eval' :: Expr '[BasePrim] -> Eval (Value '[LambdaValue Eval, BaseValue])
-eval' a = eval a
 
 ----------------------------------------------------------------------
 
@@ -114,6 +106,9 @@ prim p = Fix (Prim (inject' p))
 
 lit :: (BasePrim :<< p) => Double -> Expr p
 lit n = prim (MkDouble n)
+
+txt :: (BasePrim :<< p) => Text -> Expr p
+txt t = prim (MkText t)
 
 (**) :: (BasePrim :<< p) => Expr p -> Expr p -> Expr p
 (**) a b = prim MkPair ! a ! b
