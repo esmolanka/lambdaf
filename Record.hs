@@ -20,11 +20,12 @@ import Data.Functor.Const
 import Data.Functor.Foldable (Fix (..), unfix)
 import qualified Data.Map as M
 import Data.Sum
+import qualified Data.Text as T
 
 import Expr
 import Utils
-
-type Label = String
+import Position
+import Types
 
 data RecordPrim
   = RecordNil
@@ -43,7 +44,7 @@ instance Show1 RecordValue where
       let showBody [] = id
           showBody lst =
             foldr1 (\a b -> a . showString ", " . b) $
-              map (\(lbl, el) -> showString lbl . showString " = " . sp 0 el) lst
+              map (\(Label lbl, el) -> shows lbl . showString " = " . sp 0 el) lst
       in showString "{" . showBody (M.toList x) . showString "}"
 
 instance ( Member (Error String) sig
@@ -62,25 +63,45 @@ instance ( Member (Error String) sig
             Just (VRecord r') -> pure $ mkVRecord (M.insert lbl a r')
             _ -> throwError "RecordExtend: not a record"
 
-      Const (RecordSelect lbl) ->
+      Const (RecordSelect lbl@(Label lbl')) ->
         pure $ mkVLam @m $ \r ->
           case projRecord r of
             Just (VRecord r') ->
               case M.lookup lbl r' of
                 Just a  -> pure a
-                Nothing -> throwError ("RecordSelect: label not found " ++ lbl)
+                Nothing -> throwError ("RecordSelect: label not found " ++ show lbl')
             _ -> throwError "RecordSelect: not a record"
 
     where
       projRecord = project @RecordValue . unfix
 
+instance TypePrim (Const RecordPrim) where
+  typePrim = \case
+    Const RecordNil ->
+      mono $ Fix $ TRecord $ Fix $ TRowEmpty
+    Const (RecordExtend label) ->
+      forall Star $ \a ->
+      forall Star $ \b ->
+      forall Row  $ \r ->
+      effect $ \e1 ->
+      effect $ \e2 ->
+      mono $
+        (a, e1) ~>
+        (Fix $ TRecord $ Fix $ TRowExtend label (Fix TAbsent) b r, e2) ~>
+        (Fix $ TRecord $ Fix $ TRowExtend label (Fix TPresent) a r)
+    Const (RecordSelect label) ->
+      forall Star $ \a ->
+      forall Row  $ \r ->
+      effect $ \e ->
+      mono $ (Fix $ TRecord $ Fix $ TRowExtend label (Fix TPresent) a r, e) ~> a
+
 ----------------------------------------------------------------------
 
 rnil :: (RecordPrim :<< p) => Expr p
-rnil = Fix (Prim (inject' RecordNil))
+rnil = Fix (Prim dummyPos (inject' RecordNil))
 
-rext :: (RecordPrim :<< p) => Label -> Expr p -> Expr p -> Expr p
-rext lbl a r = Fix (Prim (inject' (RecordExtend lbl))) ! a ! r
+rext :: (RecordPrim :<< p) => String -> Expr p -> Expr p -> Expr p
+rext lbl a r = Fix (Prim dummyPos (inject' (RecordExtend (Label (T.pack lbl))))) ! a ! r
 
-rsel :: (RecordPrim :<< p) => Label -> Expr p -> Expr p
-rsel lbl r = Fix (Prim (inject' (RecordSelect lbl))) ! r
+rsel :: (RecordPrim :<< p) => String -> Expr p -> Expr p
+rsel lbl r = Fix (Prim dummyPos (inject' (RecordSelect (Label (T.pack lbl))))) ! r

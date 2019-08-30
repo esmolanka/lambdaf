@@ -30,6 +30,9 @@ import Data.Sum
 import Expr
 import Base (BaseValue(..))
 import Utils
+import Position
+
+import Types
 
 data AnfValue e
   = VAnf EExpr
@@ -55,7 +58,7 @@ data AnfPrim
 
 instance
   ( Member (Error String) sig
-  , Member (Reader (M.Map Var (Value v))) sig
+  , Member (Reader (M.Map Variable (Value v))) sig
   , Member (State EVar) sig
   , Carrier sig m
   , LambdaValue m :< v
@@ -115,6 +118,30 @@ instance
       projAnf :: (AnfValue :< v) => Value v -> Maybe (AnfValue (Value v))
       projAnf = project @AnfValue . unfix
 
+instance TypePrim (Const AnfPrim) where
+  typePrim = \case
+    Const EConst ->
+      effect $ \e1 ->
+      mono $
+        (Fix (T TDouble), e1) ~> Fix (TExpr (Fix (TE TEDouble)))
+
+    Const (EPrim EAdd) ->
+      effect $ \e1 ->
+      effect $ \e2 ->
+      mono $
+        (Fix (TExpr (Fix (TE TEDouble))), e1) ~>
+        (Fix (TExpr (Fix (TE TEDouble))), e2) ~> Fix (TExpr (Fix (TE TEDouble)))
+
+    Const (EPrim (EStore _)) -> error "EStore"
+
+    -- loop : (Expr a -> (Expr a, b)) -> b
+    Const ELoop ->
+      effect $ \e1 ->
+      forall EStar $ \a ->
+      forall Star $ \b ->
+      mono $
+        ( (Fix (TExpr a), e1) ~> Fix (TPair (Fix (TExpr a)) b), e1) ~> b
+
 ----------------------------------------------------------------------
 -- ANF
 
@@ -142,8 +169,8 @@ fresh = do
 
 eapply :: (Member (State EVar) sig, Carrier sig m) => EPrim -> EExpr -> EExpr -> m EExpr
 eapply newprim lhs rhs = do
-  var <- fresh
-  pure (go var S.empty lhs)
+  var' <- fresh
+  pure (go var' S.empty lhs)
   where
     go :: EVar -> S.Set EVar -> EExpr -> EExpr
     go x used = \case
@@ -170,10 +197,10 @@ eapply newprim lhs rhs = do
 ----------------------------------------------------------------------
 
 cnst :: (AnfPrim :<< p) => Expr p -> Expr p
-cnst x = Fix (Prim (inject' EConst)) ! x
+cnst x = Fix (Prim dummyPos (inject' EConst)) ! x
 
 eadd :: (AnfPrim :<< p) => Expr p -> Expr p -> Expr p
-eadd x y = Fix (Prim (inject' (EPrim EAdd))) ! x ! y
+eadd x y = Fix (Prim dummyPos (inject' (EPrim EAdd))) ! x ! y
 
 loop :: (AnfPrim :<< p) => Expr p -> Expr p
-loop x = Fix (Prim (inject' ELoop)) ! x
+loop x = Fix (Prim dummyPos (inject' ELoop)) ! x

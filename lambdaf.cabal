@@ -14,7 +14,6 @@ extra-source-files:  README.md
 cabal-version:       >=1.10
 
 library
-  build-tools:         alex, happy
   hs-source-dirs:      .
   ghc-options:         -Wall -fno-warn-name-shadowing -fno-warn-unused-do-bind
   exposed-modules:
@@ -24,8 +23,14 @@ library
     Base
     IO
     Record
+    Types
+    Context
+    Errors
+    Position
+    Pretty
+    TypeChecker
     Main
   build-depends:
-    base >= 4.7 && < 5, prettyprinter, containers, mtl,
+    base >= 4.7 && < 5, prettyprinter, containers, transformers-compat,
     text, recursion-schemes, fastsum, fused-effects
   default-language:    Haskell2010

@@ -15,7 +15,8 @@ module Base where
 import Control.Effect.Carrier
 import Control.Effect.Error
 
-import Data.Text
+import qualified Data.Text as T
+import Data.Text (Text)
 import Data.Functor.Classes
 import Data.Functor.Const
 import Data.Functor.Foldable (Fix (..), unfix)
@@ -23,10 +24,14 @@ import Data.Sum
 
 import Expr
 import Utils
+import Position
+
+import Types
 
 data BasePrim
   = Add
   | If
+  | ReadDouble
   | MkPair
   | MkDouble Double
   | MkText Text
@@ -73,15 +78,24 @@ instance ( Member (Error String) sig
                 _ -> throwError "RHS is not a double!"
             _ -> throwError "LHS is not a double!"
 
+      Const ReadDouble ->
+        pure $ mkVLam @m $ \x ->
+          case projBase x of
+            Just (VText x') ->
+              case reads (T.unpack x') of
+                [(dbl,"")] -> pure $ mkVDbl dbl
+                _          -> throwError ("Could not read double: " ++ show x')
+            _ -> throwError "ReadDouble: not a string"
+
       Const If ->
         pure $ mkVLam @m $ \c ->
         pure $ mkVLam @m $ \t ->
         pure $ mkVLam @m $ \f ->
-         case projBase c of
-           Just (VDbl c')
-             | c' > 0    -> pure t
-             | otherwise -> pure f
-           _ -> throwError "Condition is not a double!"
+          case projBase c of
+            Just (VDbl c')
+              | c' > 0    -> forceDelayed t
+              | otherwise -> forceDelayed f
+            _ -> throwError "Condition is not a double!"
 
       Const MkPair ->
         pure $ mkVLam @m $ \a ->
@@ -97,18 +111,70 @@ instance ( Member (Error String) sig
       Const MkUnit ->
         pure $ mkVUnit
     where
+      forceDelayed l =
+        case projLam l of
+          Just (VLam f) -> f mkVUnit
+          Nothing -> throwError "Cannot force a non-lambda"
+
+      projLam :: (LambdaValue m :< v) => Value v -> Maybe (LambdaValue m (Value v))
+      projLam = project @(LambdaValue m) . unfix
+
+      projBase :: (BaseValue :< v) => Value v -> Maybe (BaseValue (Value v))
       projBase = project @BaseValue . unfix
+
+partialEff :: Label
+partialEff = Label (T.pack "partial")
+
+instance TypePrim (Const BasePrim) where
+  typePrim = \case
+    Const Add ->
+      effect $ \e1 ->
+      effect $ \e2 ->
+      mono $
+        (Fix (T TDouble), e1) ~>
+        (Fix (T TDouble), e2) ~> Fix (T TDouble)
+    Const ReadDouble ->
+      effect $ \e1 ->
+      mono $
+        (Fix (T TText), Fix (TRowExtend partialEff (Fix TPresent) (Fix (T TUnit)) e1)) ~>
+        (Fix (T TDouble))
+    Const If ->
+      forall Star $ \a ->
+      effect $ \e1 ->
+      effect $ \e2 ->
+      effect $ \e3 ->
+      mono $
+        (Fix (T TDouble), e1) ~>
+        ((Fix (T TUnit), e3) ~> a, e2) ~>
+        ((Fix (T TUnit), e3) ~> a, e3) ~> a
+    Const MkPair ->
+      forall Star $ \a ->
+      forall Star $ \b ->
+      effect $ \e1 ->
+      effect $ \e2 ->
+      mono $
+        (a, e1) ~>
+        (b, e2) ~> Fix (TPair a b)
+    Const (MkDouble _) ->
+      mono $ Fix $ T $ TDouble
+    Const (MkText _) ->
+      mono $ Fix $ T $ TText
+    Const MkUnit ->
+      mono $ Fix $ T $ TUnit
 
 ----------------------------------------------------------------------
 
 prim :: (BasePrim :<< p) => BasePrim -> Expr p
-prim p = Fix (Prim (inject' p))
+prim p = Fix (Prim dummyPos (inject' p))
+
+if_ :: (BasePrim :<< p) => Expr p -> Expr p -> Expr p -> Expr p
+if_ c t f = prim If ! c ! t ! f
 
 lit :: (BasePrim :<< p) => Double -> Expr p
 lit n = prim (MkDouble n)
 
-txt :: (BasePrim :<< p) => Text -> Expr p
-txt t = prim (MkText t)
+txt :: (BasePrim :<< p) => String -> Expr p
+txt t = prim (MkText (T.pack t))
 
 (**) :: (BasePrim :<< p) => Expr p -> Expr p -> Expr p
 (**) a b = prim MkPair ! a ! b

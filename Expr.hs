@@ -27,17 +27,18 @@ import Data.Sum
 import Data.Void
 
 import Utils
+import Position
 
-type Var = Int
+type Variable = Int
 
 type Expr (p :: [*]) = Fix (ExprF p)
 type Value (l :: [* -> *]) = Fix (Sum l)
 
 data ExprF (p :: [*]) e
-  = Var Var
-  | Lam Var e
-  | App e e
-  | Prim (Sum' p)
+  = Ref    Position Variable
+  | Lambda Position Variable e
+  | App    Position e e
+  | Prim   Position (Sum' p)
     deriving (Functor)
 
 data LambdaValue m e
@@ -58,7 +59,7 @@ instance (Apply (EvalPrim m v) ps) => EvalPrim m v (Sum ps) where
 
 eval :: forall m sig (p :: [*]) (v :: [* -> *]).
   ( Member (Error String) sig -- MonadError String m
-  , Member (Reader (M.Map Var (Value v))) sig -- MonadReader (M.Map Var (Value v)) m
+  , Member (Reader (M.Map Variable (Value v))) sig -- MonadReader (M.Map Var (Value v)) m
   , Carrier sig m
   , EvalPrim m v (Sum (Map Const p))
   , LambdaValue m :< v
@@ -67,38 +68,38 @@ eval = cata alg
   where
     alg :: ExprF p (m (Value v)) -> m (Value v)
     alg = \case
-      Var x -> do
+      Ref pos x -> do
         v <- asks (M.lookup x)
         case v of
-          Nothing -> throwError $ "Variable not found: " ++ show x
+          Nothing -> throwError $ show pos ++ ": Variable not found: " ++ show x
           Just v' -> pure v'
 
-      Lam x body -> do
+      Lambda _pos x body -> do
         env <- ask
         let f v = local (\_ -> M.insert x v env) body
         pure $ mkVLam @m f
 
-      App f e -> do
+      App pos f e -> do
         f' <- f
         case project (unfix f') of
           Just (VLam f'') -> e >>= f''
-          _ -> throwError "Could not apply to a non-function"
+          _ -> throwError $ show pos ++ ": Could not apply to a non-function"
 
-      Prim p ->
+      Prim _pos p ->
         evalPrim p
 
 ----------------------------------------------------------------------
 
-var :: Var -> Expr p
-var x = Fix (Var x)
+var :: Variable -> Expr p
+var x = Fix (Ref dummyPos x)
 
-lam :: Var -> Expr p -> Expr p
-lam x b = Fix (Lam x b)
+lam :: Variable -> Expr p -> Expr p
+lam x b = Fix (Lambda dummyPos x b)
 
-let_ :: Var -> Expr p -> Expr p -> Expr p
-let_ x a b = Fix (App (Fix (Lam x b)) a)
+let_ :: Variable -> Expr p -> Expr p -> Expr p
+let_ x a b = Fix (App dummyPos (Fix (Lambda dummyPos x b)) a)
 
 (!) :: Expr p -> Expr p -> Expr p
-(!) f e = Fix (App f e)
+(!) f e = Fix (App dummyPos f e)
 
 infixl 1 !
