@@ -23,11 +23,11 @@ import Data.Functor.Classes
 import Data.Functor.Const
 import Data.Functor.Foldable (Fix (..), unfix)
 import qualified Data.Map as M
-import Data.Proxy
 import qualified Data.Set as S
 import Data.Sum
 
 import Expr
+import Base (BaseValue(..), BasePrim(..), prim, lit, (**))
 import Utils
 
 data AnfValue e
@@ -56,19 +56,20 @@ instance
   ( MonadError String m
   , MonadReader (M.Map Var (Value v)) m
   , MonadState EVar m
-  , BaseValue m :< v
+  , LambdaValue m :< v
+  , BaseValue :< v
   , AnfValue :< v
   ) => EvalPrim m v (Const AnfPrim) where
   evalPrim = \case
     Const EConst ->
-      pure $ mkVLam (Proxy @m) $ \x ->
+      pure $ mkVLam @m $ \x ->
         case projBase x of
           Just (VDbl x') -> pure $ mkVAnf (EIn (ELit x'))
           _ -> throwError "Value is not a double!"
 
     Const (EPrim eprim) ->
-      pure $ mkVLam (Proxy @m) $ \x ->
-      pure $ mkVLam (Proxy @m) $ \y ->
+      pure $ mkVLam @m $ \x ->
+      pure $ mkVLam @m $ \y ->
         case projAnf x of
           Just (VAnf x') ->
             case projAnf y of
@@ -79,8 +80,8 @@ instance
           _ -> throwError "LHS is not an ANF!"
 
     Const ELoop ->
-      pure $ mkVLam (Proxy @m) $ \f ->
-        case projBase f of
+      pure $ mkVLam @m $ \f ->
+        case projLam f of
           Just (VLam f') -> do
             stateVar <- fresh
             res <- f' (mkVAnf (EIntro stateVar (EIn (ERef stateVar))))
@@ -103,8 +104,11 @@ instance
 
           _ -> throwError "Loop body is not a function!"
     where
-      projBase :: (BaseValue m :< v) => Value v -> Maybe (BaseValue m (Value v))
-      projBase = project @(BaseValue m) . unfix
+      projLam :: (LambdaValue m :< v) => Value v -> Maybe (LambdaValue m (Value v))
+      projLam = project @(LambdaValue m) . unfix
+
+      projBase :: (BaseValue :< v) => Value v -> Maybe (BaseValue (Value v))
+      projBase = project @BaseValue . unfix
 
       projAnf :: (AnfValue :< v) => Value v -> Maybe (AnfValue (Value v))
       projAnf = project @AnfValue . unfix
@@ -163,9 +167,9 @@ eapply newprim lhs rhs = do
 
 ----------------------------------------------------------------------
 
-newtype AnfEval a = AnfEval {unAnfEval :: ExceptT String (ReaderT (M.Map Var (Value '[BaseValue AnfEval, AnfValue])) (State EVar)) a}
+newtype AnfEval a = AnfEval {unAnfEval :: ExceptT String (ReaderT (M.Map Var (Value '[LambdaValue AnfEval, BaseValue, AnfValue])) (State EVar)) a}
   deriving ( Functor, Applicative, Monad
-           , MonadReader (M.Map Var (Value '[BaseValue AnfEval, AnfValue]))
+           , MonadReader (M.Map Var (Value '[LambdaValue AnfEval, BaseValue, AnfValue]))
            , MonadState EVar
            , MonadError String
            )
@@ -173,7 +177,7 @@ newtype AnfEval a = AnfEval {unAnfEval :: ExceptT String (ReaderT (M.Map Var (Va
 runAnfEval :: AnfEval a -> Either String a
 runAnfEval k = evalState (runReaderT (runExceptT (unAnfEval k)) M.empty) 100
 
-anfeval' :: Expr '[BasePrim, AnfPrim] -> AnfEval (Value '[BaseValue AnfEval, AnfValue])
+anfeval' :: Expr '[BasePrim, AnfPrim] -> AnfEval (Value '[LambdaValue AnfEval, BaseValue, AnfValue])
 anfeval' a = eval a
 
 ----------------------------------------------------------------------
