@@ -12,8 +12,10 @@
 
 module Base where
 
-import Control.Monad.Except
-import Control.Monad.Reader
+import Control.Effect.Carrier
+import Control.Effect.Pure
+import Control.Effect.Error
+import Control.Effect.Reader
 
 import Data.Functor.Classes
 import Data.Functor.Const
@@ -51,7 +53,8 @@ instance Show1 BaseValue where
     VPair a b -> showString "(" . sp 0 a . showString " ** " . sp 0 b . showString ")"
     VUnit     -> showString "Unit"
 
-instance ( MonadError String m
+instance ( Member (Error String) sig
+         , Carrier sig m
          , LambdaValue m :< v
          , BaseValue :< v
          ) => EvalPrim m v (Const BasePrim) where
@@ -91,14 +94,15 @@ instance ( MonadError String m
 
 ----------------------------------------------------------------------
 
-newtype Eval a = Eval {uneval :: ExceptT String (Reader (M.Map Var (Value '[LambdaValue Eval, BaseValue]))) a}
-  deriving ( Functor, Applicative, Monad
-           , MonadReader (M.Map Var (Value '[LambdaValue Eval, BaseValue]))
-           , MonadError String
-           )
+newtype Eval a = Eval
+  { unEval :: ErrorC String (ReaderC (M.Map Var (Value '[LambdaValue Eval, BaseValue])) PureC) a
+  } deriving (Functor, Applicative, Monad)
+
+instance (Monad Eval) => Carrier (Error String :+: Reader (M.Map Var (Value '[LambdaValue Eval, BaseValue])) :+: Pure) Eval where
+  eff x = Eval $ eff (hmap unEval x)
 
 runEval :: Eval a -> Either String a
-runEval k = runReader (runExceptT (uneval k)) M.empty
+runEval k = runPureC . runReader M.empty . runError . unEval $ k
 
 eval' :: Expr '[BasePrim] -> Eval (Value '[LambdaValue Eval, BaseValue])
 eval' a = eval a

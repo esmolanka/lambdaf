@@ -16,8 +16,8 @@
 
 module Expr where
 
-import Control.Monad.Except
-import Control.Monad.Reader
+import Control.Effect.Error
+import Control.Effect.Reader
 
 import Data.Functor.Classes
 import Data.Functor.Const
@@ -56,9 +56,10 @@ class EvalPrim m v (p :: * -> *) where
 instance (Apply (EvalPrim m v) ps) => EvalPrim m v (Sum ps) where
   evalPrim = apply @(EvalPrim m v) evalPrim
 
-eval :: forall m (p :: [*]) (v :: [* -> *]).
-  ( MonadError String m
-  , MonadReader (M.Map Var (Value v)) m
+eval :: forall m sig (p :: [*]) (v :: [* -> *]).
+  ( Member (Error String) sig -- MonadError String m
+  , Member (Reader (M.Map Var (Value v))) sig -- MonadReader (M.Map Var (Value v)) m
+  , Carrier sig m
   , EvalPrim m v (Sum (Map Const p))
   , LambdaValue m :< v
   ) => Expr p -> m (Value v)

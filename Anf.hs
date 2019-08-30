@@ -15,9 +15,11 @@ module Anf where
 
 import Prelude hiding ((**))
 
-import Control.Monad.Except
-import Control.Monad.Reader
-import Control.Monad.State
+import Control.Effect.Carrier
+import Control.Effect.Pure
+import Control.Effect.Error
+import Control.Effect.Reader
+import Control.Effect.State
 
 import Data.Functor.Classes
 import Data.Functor.Const
@@ -53,9 +55,10 @@ data AnfPrim
   deriving (Show)
 
 instance
-  ( MonadError String m
-  , MonadReader (M.Map Var (Value v)) m
-  , MonadState EVar m
+  ( Member (Error String) sig
+  , Member (Reader (M.Map Var (Value v))) sig
+  , Member (State EVar) sig
+  , Carrier sig m
   , LambdaValue m :< v
   , BaseValue :< v
   , AnfValue :< v
@@ -100,7 +103,7 @@ instance
                   Just (VAnf x)       -> pure x
                   _                   -> throwError "Can't flatten yet"
 
-            (store res >>= flatten >>= pure . mkVAnf) `catchError` (\_ -> store res)
+            (store res >>= flatten >>= pure . mkVAnf) `catchError` (\(_ :: String) -> store res)
 
           _ -> throwError "Loop body is not a function!"
     where
@@ -132,13 +135,13 @@ data EValue
   | ELit Double
     deriving (Show)
 
-fresh :: (MonadState EVar m) => m EVar
+fresh :: (Member (State EVar) sig, Carrier sig m) => m EVar
 fresh = do
   x <- get
-  modify succ
+  modify (succ :: EVar -> EVar)
   return x
 
-eapply :: (MonadState EVar m) => EPrim -> EExpr -> EExpr -> m EExpr
+eapply :: (Member (State EVar) sig, Carrier sig m) => EPrim -> EExpr -> EExpr -> m EExpr
 eapply newprim lhs rhs = do
   var <- fresh
   pure (go var S.empty lhs)
@@ -167,15 +170,15 @@ eapply newprim lhs rhs = do
 
 ----------------------------------------------------------------------
 
-newtype AnfEval a = AnfEval {unAnfEval :: ExceptT String (ReaderT (M.Map Var (Value '[LambdaValue AnfEval, BaseValue, AnfValue])) (State EVar)) a}
-  deriving ( Functor, Applicative, Monad
-           , MonadReader (M.Map Var (Value '[LambdaValue AnfEval, BaseValue, AnfValue]))
-           , MonadState EVar
-           , MonadError String
-           )
+newtype AnfEval a = AnfEval
+  {unAnfEval :: ErrorC String (ReaderC (M.Map Var (Value '[LambdaValue AnfEval, BaseValue, AnfValue])) (StateC EVar PureC)) a
+  } deriving ( Functor, Applicative, Monad )
+
+instance Carrier (Error String :+: Reader (M.Map Var (Value '[LambdaValue AnfEval, BaseValue, AnfValue])) :+: State EVar :+: Pure) AnfEval where
+  eff x = AnfEval $ eff (hmap unAnfEval x)
 
 runAnfEval :: AnfEval a -> Either String a
-runAnfEval k = evalState (runReaderT (runExceptT (unAnfEval k)) M.empty) 100
+runAnfEval k = runPureC . evalState 100 . runReader M.empty . runError . unAnfEval $ k
 
 anfeval' :: Expr '[BasePrim, AnfPrim] -> AnfEval (Value '[LambdaValue AnfEval, BaseValue, AnfValue])
 anfeval' a = eval a
