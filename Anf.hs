@@ -1,67 +1,113 @@
-{-# LANGUAGE DeriveFunctor    #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE LambdaCase       #-}
+{-# LANGUAGE DataKinds                  #-}
+{-# LANGUAGE DeriveFunctor              #-}
+{-# LANGUAGE FlexibleContexts           #-}
+{-# LANGUAGE FlexibleInstances          #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE LambdaCase                 #-}
+{-# LANGUAGE MultiParamTypeClasses      #-}
+{-# LANGUAGE ScopedTypeVariables        #-}
+{-# LANGUAGE TypeApplications           #-}
+{-# LANGUAGE TypeOperators              #-}
+-- :-/
+{-# LANGUAGE UndecidableInstances       #-}
 
 module Anf where
 
 import Prelude hiding ((**))
 
 import Control.Monad.Except
+import Control.Monad.Reader
 import Control.Monad.State
 
-import Data.Functor.Foldable (Fix (..))
+import Data.Functor.Classes
+import Data.Functor.Const
+import Data.Functor.Foldable (Fix (..), unfix)
+import qualified Data.Map as M
+import Data.Proxy
 import qualified Data.Set as S
+import Data.Sum
 
 import Expr
+import Utils
 
-type AnfM = EvalT ValueAnf (State EVar)
+data AnfValue e
+  = VAnf EExpr
+  | VStore EVar EExpr e
+  deriving (Show)
 
-data ValueAnf = VAnf EExpr | VStore EVar EExpr AnfValue deriving (Show)
-data PrimAnf = Const | EPrim EPrim | ELoop deriving (Show)
+mkVAnf :: (AnfValue :< v) => EExpr -> Value v
+mkVAnf = Fix . inject . VAnf
 
-type AnfPrim = Prim PrimAnf
-type AnfValue = Value (State EVar) ValueAnf
+mkVStore :: (AnfValue :< v) => EVar -> EExpr -> Value v -> Value v
+mkVStore x s r = Fix (inject (VStore x s r))
 
-evalPrim :: PrimAnf -> AnfM AnfValue
-evalPrim = \case
-  Const ->
-    pure $ VLam $ \x ->
-      case x of
-        VDbl x' -> pure $ VExt $ VAnf (EIn (ELit x'))
-        _ -> throwError "Value is not a double!"
+instance Show1 AnfValue where
+  liftShowsPrec sp _ _ = \case
+    VAnf e -> showString "{" . shows e . showString "}"
+    VStore x s r -> showString "{@" . shows x . showString " = " . shows s . showString "; " . sp 0 r . showString "}"
 
-  EPrim eprim -> do
-    pure $ VLam $ \x -> pure $ VLam $ \y ->
-      case x of
-        VExt (VAnf x') ->
-          case y of
-            VExt (VAnf y') -> do
-              anf <- apply eprim x' y'
-              pure (VExt (VAnf anf))
-            _ -> throwError "RHS is not an ANF!"
-        _ -> throwError "LHS is not an ANF!"
+data AnfPrim
+  = EConst
+  | EPrim EPrim
+  | ELoop
+  deriving (Show)
 
-  ELoop ->
-    pure $ VLam $ \f ->
-      case f of
-        VLam f' -> do
-          stateVar <- fresh
-          res <- f' (VExt (VAnf (EIntro stateVar (EIn (ERef stateVar)))))
-          let store :: AnfValue -> AnfM AnfValue
-              store = \case
-                (VExt (VStore x s r))     -> VExt . VStore x s <$> store r
-                (VPair (VExt (VAnf s)) r) -> pure (VExt (VStore stateVar s r))
-                _                         -> throwError $ "Loop result is not a VStore or VPair"
+instance
+  ( MonadError String m
+  , MonadReader (M.Map Var (Value v)) m
+  , MonadState EVar m
+  , BaseValue m :< v
+  , AnfValue :< v
+  ) => EvalPrim m v (Const AnfPrim) where
+  evalPrim = \case
+    Const EConst ->
+      pure $ mkVLam (Proxy @m) $ \x ->
+        case projBase x of
+          Just (VDbl x') -> pure $ mkVAnf (EIn (ELit x'))
+          _ -> throwError "Value is not a double!"
 
-              flatten :: AnfValue -> AnfM EExpr
-              flatten = \case
-                VExt (VStore x s r) -> apply (EStore x) (EIntro x s) =<< flatten r
-                VExt (VAnf x)       -> pure x
-                _                   -> throwError "Can't flatten yet"
+    Const (EPrim eprim) ->
+      pure $ mkVLam (Proxy @m) $ \x ->
+      pure $ mkVLam (Proxy @m) $ \y ->
+        case projAnf x of
+          Just (VAnf x') ->
+            case projAnf y of
+              Just (VAnf y') -> do
+                anf <- eapply eprim x' y'
+                pure (mkVAnf anf)
+              _ -> throwError "RHS is not an ANF!"
+          _ -> throwError "LHS is not an ANF!"
 
-          (store res >>= flatten >>= pure . VExt . VAnf) `mplus` store res
+    Const ELoop ->
+      pure $ mkVLam (Proxy @m) $ \f ->
+        case projBase f of
+          Just (VLam f') -> do
+            stateVar <- fresh
+            res <- f' (mkVAnf (EIntro stateVar (EIn (ERef stateVar))))
+            let store :: Value v -> m (Value v)
+                store v = case (projBase v, projAnf v) of
+                  (_, Just (VStore x s r))  -> mkVStore x s <$> store r
+                  (Just (VPair s r), _) ->
+                    case projAnf s of
+                      (Just (VAnf s')) -> pure (mkVStore stateVar s' r)
+                      _                -> throwError $ "Loop result is not a VStore or VPair"
+                  _               -> throwError $ "Loop result is not a VStore or VPair"
 
-        _ -> throwError "Loop body is not a function!"
+                flatten :: Value v -> m EExpr
+                flatten v = case projAnf v of
+                  Just (VStore x s r) -> eapply (EStore x) (EIntro x s) =<< flatten r
+                  Just (VAnf x)       -> pure x
+                  _                   -> throwError "Can't flatten yet"
+
+            (store res >>= flatten >>= pure . mkVAnf) `catchError` (\_ -> store res)
+
+          _ -> throwError "Loop body is not a function!"
+    where
+      projBase :: (BaseValue m :< v) => Value v -> Maybe (BaseValue m (Value v))
+      projBase = project @(BaseValue m) . unfix
+
+      projAnf :: (AnfValue :< v) => Value v -> Maybe (AnfValue (Value v))
+      projAnf = project @AnfValue . unfix
 
 ----------------------------------------------------------------------
 -- ANF
@@ -82,14 +128,14 @@ data EValue
   | ELit Double
     deriving (Show)
 
-fresh :: AnfM EVar
+fresh :: (MonadState EVar m) => m EVar
 fresh = do
   x <- get
   modify succ
   return x
 
-apply :: EPrim -> EExpr -> EExpr -> AnfM EExpr
-apply newprim lhs rhs = do
+eapply :: (MonadState EVar m) => EPrim -> EExpr -> EExpr -> m EExpr
+eapply newprim lhs rhs = do
   var <- fresh
   pure (go var S.empty lhs)
   where
@@ -115,53 +161,36 @@ apply newprim lhs rhs = do
       EIn rhsval ->
         ELet x newprim [lhsval, rhsval] (EIn (ERef x))
 
+----------------------------------------------------------------------
+
+newtype AnfEval a = AnfEval {unAnfEval :: ExceptT String (ReaderT (M.Map Var (Value '[BaseValue AnfEval, AnfValue])) (State EVar)) a}
+  deriving ( Functor, Applicative, Monad
+           , MonadReader (M.Map Var (Value '[BaseValue AnfEval, AnfValue]))
+           , MonadState EVar
+           , MonadError String
+           )
+
+runAnfEval :: AnfEval a -> Either String a
+runAnfEval k = evalState (runReaderT (runExceptT (unAnfEval k)) M.empty) 100
+
+anfeval' :: Expr '[BasePrim, AnfPrim] -> AnfEval (Value '[BaseValue AnfEval, AnfValue])
+anfeval' a = eval a
 
 ----------------------------------------------------------------------
 -- Example
 
-eval' :: AnfExpr -> AnfValue
-eval' = either error id . flip evalState 100 . runEvalT . eval evalPrim
+cnst :: (AnfPrim :<< p) => Expr p -> Expr p
+cnst x = Fix (Prim (inject' EConst)) ! x
 
+eadd :: (AnfPrim :<< p) => Expr p -> Expr p -> Expr p
+eadd x y = Fix (Prim (inject' (EPrim EAdd))) ! x ! y
 
-type AnfExpr = Expr PrimAnf
-
-var :: Var -> AnfExpr
-var x = Fix (Var x)
-
-lit :: Double -> AnfExpr
-lit n = Fix (Lit n)
-
-(**) :: AnfExpr -> AnfExpr -> AnfExpr
-(**) a b = prim MkPair ! a ! b
-
-infixr 3 **
-
-lam :: Var -> AnfExpr -> AnfExpr
-lam x b = Fix (Lam x b)
-
-let_ :: Var -> AnfExpr -> AnfExpr -> AnfExpr
-let_ x a b = Fix (App (Fix (Lam x b)) a)
-
-(!) :: AnfExpr -> AnfExpr -> AnfExpr
-(!) f e = Fix (App f e)
-
-infixl 1 !
-
-prim :: Prim PrimAnf -> AnfExpr
-prim p = Fix (Prim p)
-
-cnst :: AnfExpr -> AnfExpr
-cnst x = prim (Ext Const) ! x
-
-eadd :: AnfExpr -> AnfExpr -> AnfExpr
-eadd x y = prim (Ext (EPrim EAdd)) ! x ! y
-
-loop :: AnfExpr -> AnfExpr
-loop x = prim (Ext ELoop) ! x
+loop :: (AnfPrim :<< p) => Expr p -> Expr p
+loop x = Fix (Prim (inject' ELoop)) ! x
 
 ----------------------------------------------------------------------
 
-test1 :: AnfExpr
+test1 :: Expr '[BasePrim, AnfPrim]
 test1 =
   let_ 0 (lit (-3.14))
   $ let_ 1 (prim Add ! lit 10 ! var 0)
@@ -169,7 +198,7 @@ test1 =
   $ let_ 3 (var 2 `eadd` var 2)
   $ var 2 `eadd` (prim If ! var 0 ! var 2 ! var 3)
 
-test2 :: AnfExpr
+test2 :: Expr '[BasePrim, AnfPrim]
 test2 =
   loop $ lam 1 $
     loop $ lam 2 $
