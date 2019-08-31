@@ -225,23 +225,15 @@ inferType = para alg
           , eff2
           )
 
-      -- Let pos DoBinding x (_, e) (_, b) -> let ?pos = pos in do
-      --   (se, te, eff1) <- e
-      --   (sb, tb, eff2) <- Ctx.withSubst se $ Ctx.with x (TyScheme [] te) $ b
-      --   sf <- unify eff1 eff2
-      --   return
-      --     ( sb `composeSubst` sf `composeSubst` se
-      --     , tb
-          -- , eff2
-          -- )
-
-
--- inferExprType
---   :: forall m. (MonadState FreshSupply m, MonadReader Context m, MonadError TCError m) =>
---      Expr -> m (Type, Type)
--- inferExprType expr = do
---   (se, te, fe) <- inferType expr
---   return (applySubst se te, applySubst se fe)
+inferExprType
+  :: forall m sig p.
+     ( TypeChecking sig
+     , Carrier sig m
+     , TypePrim (Sum (Map Const p))
+     ) => Expr p -> m (Type, Type)
+inferExprType expr = do
+  (se, te, fe) <- inferType expr
+  return (applySubst se te, applySubst se fe)
 
 
 inferKind :: forall m sig. (?pos :: Position, TypeChecking sig, Carrier sig m) => Type -> m Kind

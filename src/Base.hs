@@ -32,6 +32,7 @@ data BasePrim
   = Add
   | If
   | ReadDouble
+  | Delay
   | MkPair
   | MkDouble Double
   | MkText Text
@@ -97,6 +98,13 @@ instance ( Member (Error String) sig
               | otherwise -> forceDelayed f
             _ -> throwError "Condition is not a double!"
 
+      Const Delay ->
+        pure $ mkVLam @m $ \f ->
+        pure $ mkVLam @m $ \u ->
+          case projBase u of
+            Just VUnit -> forceDelayed f
+            _ -> throwError "Delay expects a unit"
+
       Const MkPair ->
         pure $ mkVLam @m $ \a ->
         pure $ mkVLam @m $ \b ->
@@ -147,6 +155,13 @@ instance TypePrim (Const BasePrim) where
         (Fix (T TDouble), e1) ~>
         ((Fix (T TUnit), e3) ~> a, e2) ~>
         ((Fix (T TUnit), e3) ~> a, e3) ~> a
+    Const Delay ->
+      forall Star $ \a ->
+      effect $ \e1 ->
+      effect $ \e2 ->
+      mono $
+        ((Fix (T TUnit), e1) ~> a, e2) ~>
+        ((Fix (T TUnit), e1) ~> a)
     Const MkPair ->
       forall Star $ \a ->
       forall Star $ \b ->

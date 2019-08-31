@@ -1,0 +1,22 @@
+(let
+    ([pure (lambda (x) (let ([y (x)]) y))]
+     [echo
+      `(writeln (readln))]
+     [yes-or-no
+      `(do (writeln "Enter a number:")
+           { num <- (readnum (readln)) }
+           (if num
+               (do (writeln "Yaaay") (+ num 100))
+               (do (writeln "Noooo") (+ num -100))))]
+     [yes-or-no-2
+      (lambda (_)
+        (do (writeln "Enter a number:")
+            { num <- (readnum (readln)) }
+            (if num
+               (do (writeln "Yaaay") (+ num 100))
+               (do (writeln "Noooo") (+ num -100)))))])
+
+  (do
+      {x <- (yes-or-no)}
+      {y <- (yes-or-no-2)}
+      (+ x y)))

@@ -57,8 +57,8 @@ runEval k = runM . evalState 100 . runReader M.empty . runError . unEval $ k
 eval' :: Expr PrimTypes -> IO (Either String (Value ValueTypes))
 eval' e = runEval (eval e)
 
-infer' :: Expr PrimTypes -> Either TCError (TySubst, Type, Type)
-infer' a = runInfer (inferType a)
+infer' :: Expr PrimTypes -> Either TCError (Type, Type)
+infer' a = runInfer (inferExprType a)
 
 ----------------------------------------------------------------------
 
@@ -73,7 +73,7 @@ typeExpr :: Expr PrimTypes -> IO ()
 typeExpr e = do
   case infer' e of
     Left err -> putStrLn (pp (ppError err))
-    Right (_,ty,effty) -> putStrLn $ pp (ppType ty) ++ "\n" ++ pp (ppType effty)
+    Right (ty,effty) -> putStrLn $ pp (ppType ty) ++ "\n" ++ pp (ppType effty)
 
 ----------------------------------------------------------------------
 
@@ -117,6 +117,6 @@ main = do
 
   case infer' expr of
     Left tcerror -> die (pp (ppError tcerror))
-    Right (_,ty,effty) -> do
-      putStrLn $ "Type: " ++ pp (ppType ty) ++ "\n" ++ pp (ppType effty)
+    Right (ty,effty) -> do
+      putStrLn $ " : " ++ pp (ppType ty) ++ "\nε: " ++ pp (ppType effty)
       evalExpr expr

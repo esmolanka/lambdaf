@@ -71,10 +71,9 @@ data SugaredF e
   | MkRec   Position [(Label, e)]
   | RecProj Position Label e
   | RecExt  Position Label e e
-  -- | RecRst  Position Label e
-  -- | Delay   Position e
-  -- | Force   Position e
-  -- | DoBlock Position [SeqBinding e]
+  | Delay   Position e
+  | Force   Position e
+  | DoBlock Position [SeqBinding e]
     deriving (Generic)
 
 dsPos :: Position -> Raw.Position
@@ -147,35 +146,42 @@ desugar = resolvePrimitives . futu coalg
           (Free (Raw.App (dsPos pos) (Free (Raw.Prim (dsPos pos) (inject' (Raw.RecordExtend label)))) (Pure payload)))
           (Pure record)
 
-      -- Fix (Delay pos expr) ->
-      --   Raw.App pos
-      --     (Free (Raw.Prim pos Raw.Delay))
-      --     (Free (Raw.Lambda pos (Variable "_") (Pure expr)))
+      Fix (Delay pos expr) ->
+        Raw.App (dsPos pos)
+          (Free (Raw.Prim (dsPos pos) (inject' Raw.Delay)))
+          (Free (Raw.Lambda (dsPos pos) (Variable "_") (Pure expr)))
 
-      -- Fix (Force pos expr) ->
-      --   Raw.App pos
-      --     (Pure expr)
-      --     (Free (Raw.Prim pos Raw.LitUnit))
+      Fix (Force pos expr) ->
+        Raw.App (dsPos pos)
+          (Pure expr)
+          (Free (Raw.Prim (dsPos pos) (inject' Raw.MkUnit)))
 
-      -- Fix (DoBlock pos stmts) ->
-      --   case stmts of
-      --     [] -> error "Woot"
-      --     stmts@(_:_) ->
-      --       let bind bnd rest =
-      --             let (var, expr) = case bnd of
-      --                   IgnoringBinding expr -> (Variable "_", expr)
-      --                   OrdinarySeqBinding var expr -> (var, expr)
-      --             in Free $ Raw.Let pos Raw.DoBinding var (Pure expr) rest
-      --           block = foldr bind (case last stmts of {IgnoringBinding x -> Pure x; OrdinarySeqBinding _ x -> Pure x}) (init stmts)
-      --       in case block of
-      --            Free x -> x
-      --            Pure{} -> error "Woot"
+      Fix (DoBlock pos stmts) ->
+        let -- mkForce p a = Free (Raw.App p (Pure a) (Free (Raw.Prim p (inject' Raw.MkUnit))))
+            mkSeq p x a b = Free (Raw.App (dsPos p) (Free (Raw.Lambda (dsPos p) x b)) (Pure a))
+        in
+        case stmts of
+          [] -> error "Impossible empty do-block"
+          (_:_) ->
+            let bind bnd rest_ =
+                  let (var, expr) = case bnd of
+                        IgnoringBinding e -> (dummyVar, e)
+                        OrdinarySeqBinding x e -> (x, e)
+                  in mkSeq pos var expr rest_
+                block = foldr bind
+                  (case last stmts of
+                      IgnoringBinding e -> mkSeq pos dummyVar e (Free (Raw.Ref (dsPos pos) dummyVar))
+                      OrdinarySeqBinding x e -> mkSeq pos x e (Free (Raw.Ref (dsPos pos) x))) (init stmts)
+            in case block of
+                 Free x -> x
+                 Pure{} -> error "Impossible pure"
 
 
 
 primitives :: (Raw.BasePrim :<< p, Raw.IOPrim :<< p) => proxy p -> M.Map Variable (Int, Sum' p)
 primitives _ = M.fromList
   [ (Variable "+",     (0, inject' Raw.Add))
+  , (Variable "readnum", (0, inject' Raw.ReadDouble))
   , (Variable "readln", (0, inject' Raw.ReadLn))
   , (Variable "writeln", (0, inject' Raw.WriteLn))
   ]
@@ -304,7 +310,7 @@ sugaredGrammar = fixG $ match
              rest sugaredGrammar) >>> app)
 
   $ With (\let_ ->
-             annotated "record literal" $
+             annotated "let expression" $
              position >>>
              swap >>>
              list (
@@ -372,38 +378,27 @@ sugaredGrammar = fixG $ match
                el sugaredGrammar) >>>
              recext)
 
-  -- $ With (\recrest ->
-  --            annotated "record restriction" $
-  --            position >>>
-  --            swap >>>
-  --            list (
-  --              el labelGrammar >>>
-  --              el sugaredGrammar >>>
-  --              el (sym ":restrict")) >>>
-  --            recrest)
+  $ With (\delay ->
+             position >>>
+             swap >>>
+             prefixed Backtick sugaredGrammar >>>
+             delay)
 
-  -- $ With (\delay ->
-  --            position >>>
-  --            swap >>>
-  --            list (el (sym "delay") >>>
-  --                  el sugaredGrammar) >>>
-  --            delay)
+  $ With (\force ->
+             position >>>
+             swap >>>
+             list (el sugaredGrammar) >>>
+             force)
 
-  -- $ With (\force ->
-  --            position >>>
-  --            swap >>>
-  --            list (el sugaredGrammar) >>>
-  --            force)
-
-  -- $ With (\doblock ->
-  --            annotated "do-block" $
-  --            position >>>
-  --            swap >>>
-  --            list (el (sym "do") >>>
-  --                  el seqStmtGrammar >>>
-  --                  rest seqStmtGrammar >>>
-  --                  onTail cons) >>>
-  --            doblock)
+  $ With (\doblock ->
+             annotated "do-block" $
+             position >>>
+             swap >>>
+             list (el (sym "do") >>>
+                   el seqStmtGrammar >>>
+                   rest seqStmtGrammar >>>
+                   onTail cons) >>>
+             doblock)
 
   $ End
 
