@@ -213,18 +213,17 @@ inferType = para alg
         eff <- newTyVar Row
         return (emptySubst, typ, eff)
 
-
-      -- Let pos LetBinding x (_, e) (_, b) -> let ?pos = pos in do
-      --   (se, te, eff1) <- e
-      --   sf <- unify eff1 (Fix TRowEmpty)
-      --   (sb, tb, eff2) <- Ctx.withSubst (sf `composeSubst` se) $ do
-      --     scheme <- generalize te
-      --     Ctx.with x scheme $ b
-      --   return
-      --     ( sb `composeSubst` sf `composeSubst` se
-      --     , tb
-      --     , eff2
-      --     )
+      Let pos x (_, e) (_, b) -> let ?pos = pos in do
+        (se, te, eff1) <- e
+        sf <- unify eff1 (Fix TRowEmpty)
+        (sb, tb, eff2) <- Ctx.withSubst (sf `composeSubst` se) $ do
+          scheme <- generalize te
+          Ctx.with x scheme $ b
+        return
+          ( sb `composeSubst` sf `composeSubst` se
+          , tb
+          , eff2
+          )
 
       -- Let pos DoBinding x (_, e) (_, b) -> let ?pos = pos in do
       --   (se, te, eff1) <- e

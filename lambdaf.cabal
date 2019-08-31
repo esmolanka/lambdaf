@@ -14,7 +14,7 @@ extra-source-files:  README.md
 cabal-version:       >=1.10
 
 library
-  hs-source-dirs:      .
+  hs-source-dirs:      src
   ghc-options:         -Wall -fno-warn-name-shadowing -fno-warn-unused-do-bind
   exposed-modules:
     Expr
@@ -29,8 +29,18 @@ library
     Position
     Pretty
     TypeChecker
-    Main
+    Sugared
   build-depends:
     base >= 4.7 && < 5, prettyprinter, containers, transformers-compat,
-    text, recursion-schemes, fastsum, fused-effects
+    text, recursion-schemes, fastsum, fused-effects, sexp-grammar, free
   default-language:    Haskell2010
+
+
+executable lf
+  main-is:             Main.hs
+  ghc-options:         -Wall -fno-warn-name-shadowing -fno-warn-unused-do-bind
+  default-language:    Haskell2010
+  build-depends:
+    lambdaf, base >= 4.7 && < 5, bytestring, prettyprinter, containers,
+    transformers-compat, text, recursion-schemes, fastsum, fused-effects,
+    sexp-grammar 

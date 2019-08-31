@@ -22,6 +22,7 @@ import Control.Effect.Reader
 import Data.Functor.Classes
 import Data.Functor.Const
 import Data.Functor.Foldable (Fix (..), unfix, cata)
+import qualified Data.Text as T
 import qualified Data.Map as M
 import Data.Sum
 import Data.Void
@@ -29,7 +30,8 @@ import Data.Void
 import Utils
 import Position
 
-type Variable = Int
+newtype Variable = Variable T.Text
+  deriving (Eq, Ord, Show)
 
 type Expr (p :: [*]) = Fix (ExprF p)
 type Value (l :: [* -> *]) = Fix (Sum l)
@@ -38,6 +40,7 @@ data ExprF (p :: [*]) e
   = Ref    Position Variable
   | Lambda Position Variable e
   | App    Position e e
+  | Let    Position Variable e e
   | Prim   Position (Sum' p)
     deriving (Functor)
 
@@ -58,8 +61,8 @@ instance (Apply (EvalPrim m v) ps) => EvalPrim m v (Sum ps) where
   evalPrim = apply @(EvalPrim m v) evalPrim
 
 eval :: forall m sig (p :: [*]) (v :: [* -> *]).
-  ( Member (Error String) sig -- MonadError String m
-  , Member (Reader (M.Map Variable (Value v))) sig -- MonadReader (M.Map Var (Value v)) m
+  ( Member (Error String) sig
+  , Member (Reader (M.Map Variable (Value v))) sig
   , Carrier sig m
   , EvalPrim m v (Sum (Map Const p))
   , LambdaValue m :< v
@@ -85,19 +88,23 @@ eval = cata alg
           Just (VLam f'') -> e >>= f''
           _ -> throwError $ show pos ++ ": Could not apply to a non-function"
 
+      Let _pos x e body -> do
+        v <- e
+        local (M.insert x v) body
+
       Prim _pos p ->
         evalPrim p
 
 ----------------------------------------------------------------------
 
-var :: Variable -> Expr p
-var x = Fix (Ref dummyPos x)
+var :: Int -> Expr p
+var x = Fix (Ref dummyPos (Variable (T.pack (show x))))
 
-lam :: Variable -> Expr p -> Expr p
-lam x b = Fix (Lambda dummyPos x b)
+lam :: Int -> Expr p -> Expr p
+lam x b = Fix (Lambda dummyPos (Variable (T.pack (show x))) b)
 
-let_ :: Variable -> Expr p -> Expr p -> Expr p
-let_ x a b = Fix (App dummyPos (Fix (Lambda dummyPos x b)) a)
+let_ :: Int -> Expr p -> Expr p -> Expr p
+let_ x a b = Fix (Let dummyPos (Variable (T.pack (show x))) a b)
 
 (!) :: Expr p -> Expr p -> Expr p
 (!) f e = Fix (App dummyPos f e)

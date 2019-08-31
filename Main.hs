@@ -14,6 +14,9 @@ module Main where
 
 import Prelude hiding ((**))
 
+import System.Environment
+import System.Exit
+
 import Control.Monad.IO.Class
 import Control.Effect
 import Control.Effect.Carrier
@@ -21,7 +24,10 @@ import Control.Effect.Error
 import Control.Effect.Reader
 import Control.Effect.State
 
+import qualified Data.ByteString.Lazy.Char8 as B8
 import qualified Data.Map as M
+
+import qualified Language.SexpGrammar
 
 import Anf
 import Base
@@ -32,6 +38,8 @@ import Pretty
 import Record
 import TypeChecker
 import Types
+
+import Sugared (desugar, sugaredGrammar)
 
 type PrimTypes = '[BasePrim, RecordPrim, AnfPrim, IOPrim]
 type ValueTypes = '[LambdaValue (Eval IO), BaseValue, RecordValue, AnfValue]
@@ -71,7 +79,8 @@ typeExpr e = do
 
 test1 :: Expr PrimTypes
 test1 =
-  let_ 0 (prim ReadDouble ! readln)
+  let_ 0 (writeln (txt "Enter a number: "))
+  $ let_ 0 (prim ReadDouble ! readln)
   $ let_ 1 (prim Add ! lit 10 ! var 0)
   $ let_ 2 (cnst (var 1))
   $ let_ 3 (var 2 `eadd` var 2)
@@ -94,5 +103,20 @@ test3 =
     writeln (rsel "foo" (var 1))
 
 main :: IO ()
-main =
-  return ()
+main = do
+  args <- getArgs
+  (fn, str) <-
+    case args of
+      []   -> (,) <$> pure "<stdin>" <*> B8.getContents
+      [fn] -> (,) <$> pure fn <*> B8.readFile fn
+      _    -> die "USAGE: lf [file]"
+  expr <-
+    case Language.SexpGrammar.decodeWith sugaredGrammar fn str of
+      Left err -> die $ "parse error:\n" ++ err
+      Right s -> pure (desugar s :: Expr PrimTypes)
+
+  case infer' expr of
+    Left tcerror -> die (pp (ppError tcerror))
+    Right (_,ty,effty) -> do
+      putStrLn $ "Type: " ++ pp (ppType ty) ++ "\n" ++ pp (ppType effty)
+      evalExpr expr

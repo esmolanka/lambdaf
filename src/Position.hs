@@ -14,7 +14,7 @@ data Position = Position
   , posColumn    :: {-# UNPACK #-} !Int
   , posLineEnd   :: {-# UNPACK #-} !Int
   , posColumnEnd :: {-# UNPACK #-} !Int
-  } deriving (Show, Ord, Eq)
+  } deriving (Ord, Eq)
 
 instance Semigroup Position where
   Position fn l c _ _ <> Position _ _ _ l' c' =
@@ -28,3 +28,6 @@ instance Pretty Position where
     pretty fn <> colon <>
       pretty lin <> colon <> pretty col <> "-" <>
       pretty lin' <> colon <> pretty col'
+
+instance Show Position where
+  show = show . pretty
