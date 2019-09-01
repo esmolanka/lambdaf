@@ -27,6 +27,7 @@ library
     Prim.Record
     Prim.Link
     Prim.Link.Types
+    Prim.Exception
     Syntax.Position
     Syntax.Sugared
     TypeChecker

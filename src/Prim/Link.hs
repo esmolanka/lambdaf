@@ -10,9 +10,10 @@
 {-# LANGUAGE TypeOperators              #-}
 {-# LANGUAGE UndecidableInstances       #-}
 
+{-# OPTIONS_GHC -fno-warn-orphans #-}
+
 module Prim.Link
-  ( module Prim.Link
-  , module Prim.Link.Types
+  ( LinkPrim(..)
   ) where
 
 import Control.Effect.Carrier
@@ -27,23 +28,20 @@ import Data.Sum
 import qualified Data.Map as M
 import qualified Data.ByteString.Lazy.Char8 as BL8
 import qualified Data.Text as T
-import qualified Data.Text.Encoding as T
-import qualified Data.Text.IO as T
 
 import qualified Language.SexpGrammar
 
 import Expr
 import Pretty
-import Prim.Base
-import Prim.IO
-import Prim.Record
 import Prim.Anf
+import Prim.Base
+import Prim.Exception
+import Prim.IO
 import Prim.Link.Types
-import Syntax.Position
+import Prim.Record
 import Syntax.Sugared
-import Types
 import TypeChecker
-import Utils
+import Types
 
 instance PrettyPrim (Const LinkPrim) where
   prettyPrim = \case
@@ -52,6 +50,7 @@ instance PrettyPrim (Const LinkPrim) where
 instance ( Member (Error String) sig
          , Member (State EVar) sig
          , Member (Reader (M.Map Variable (Value v))) sig
+         , Member (Error (Value v)) sig
          , Carrier sig m
          , MonadIO m
          , LambdaValue m :< v
@@ -67,10 +66,10 @@ instance ( Member (Error String) sig
               src <- liftIO $ BL8.readFile (T.unpack fn)
               expr <- case Language.SexpGrammar.decodeWith sugaredGrammar (T.unpack fn) src of
                 Left err -> evalError $ "Link:\n" ++ err
-                Right sug -> pure (desugar sug :: Expr '[BasePrim, RecordPrim, AnfPrim, IOPrim, LinkPrim])
+                Right sug -> pure (desugar sug :: Expr '[BasePrim, RecordPrim, AnfPrim, IOPrim, LinkPrim, ExceptionPrim])
               case runInfer (inferExprType expr) of
                 Left tcerror -> evalError $ "Link:\n" ++ render (ppError tcerror)
-                Right (t', e')
+                Right (t', _e)
                   | t == t' ->
                     pure $ mkVLam @m $ \_ ->
                       local @(M.Map Variable (Value v)) (const M.empty) (eval expr)

@@ -4,10 +4,10 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase                 #-}
 {-# LANGUAGE MultiParamTypeClasses      #-}
+{-# LANGUAGE OverloadedStrings          #-}
 {-# LANGUAGE ScopedTypeVariables        #-}
 {-# LANGUAGE TypeApplications           #-}
 {-# LANGUAGE TypeOperators              #-}
--- :-/
 {-# LANGUAGE UndecidableInstances       #-}
 
 module Main where
@@ -26,6 +26,7 @@ import Control.Effect.State
 
 import qualified Data.ByteString.Lazy.Char8 as B8
 import qualified Data.Map as M
+import Data.Text.Prettyprint.Doc
 
 import qualified Language.SexpGrammar
 
@@ -34,25 +35,37 @@ import Expr
 import Pretty
 import Prim.Anf
 import Prim.Base
+import Prim.Exception
 import Prim.IO
-import Prim.Record
 import Prim.Link
+import Prim.Record
 import Syntax.Sugared (desugar, sugaredGrammar)
 import TypeChecker
 import Types
 
-type PrimTypes = '[BasePrim, RecordPrim, AnfPrim, IOPrim, LinkPrim]
+type PrimTypes = '[BasePrim, RecordPrim, AnfPrim, IOPrim, LinkPrim, ExceptionPrim]
 type ValueTypes = '[LambdaValue (Eval IO), BaseValue, RecordValue, AnfValue]
 
 newtype Eval m a = Eval
-  { unEval :: ErrorC String (ReaderC (M.Map Variable (Value ValueTypes)) (StateC EVar (LiftC m))) a
+  { unEval :: ErrorC String (ErrorC (Value ValueTypes) (ReaderC (M.Map Variable (Value ValueTypes)) (StateC EVar (LiftC m)))) a
   } deriving (Functor, Applicative, Monad, MonadIO)
 
-instance (MonadIO m) => Carrier (Error String :+: Reader (M.Map Variable (Value ValueTypes)) :+: State EVar :+: Lift m) (Eval m) where
+instance (MonadIO m) => Carrier
+    ( Error String
+      :+: Error (Value ValueTypes)
+      :+: Reader (M.Map Variable (Value ValueTypes))
+      :+: State EVar
+      :+: Lift m
+    ) (Eval m) where
   eff x = Eval $ eff (hmap unEval x)
 
 runEval :: Eval IO a -> IO (Either String a)
-runEval k = runM . evalState 100 . runReader M.empty . runError . unEval $ k
+runEval k = do
+  result <- runM . evalState 100 . runReader M.empty . runError . runError . unEval $ k
+  pure $ case result of
+    Left unhandledException -> Left (render $ nest 2 $ vsep ["Unhandled exception:", ppValue unhandledException])
+    Right (Left runtimeError) -> Left runtimeError
+    Right (Right res) -> Right res
 
 eval' :: Expr PrimTypes -> IO (Either String (Value ValueTypes))
 eval' e = runEval (eval e)
