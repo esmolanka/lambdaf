@@ -1,7 +1,7 @@
 module Errors where
 
 import Types
-import Position
+import Syntax.Position
 
 data TCError = TCError Position Reason
   deriving (Show)

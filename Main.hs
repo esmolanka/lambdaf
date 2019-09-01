@@ -29,17 +29,16 @@ import qualified Data.Map as M
 
 import qualified Language.SexpGrammar
 
-import Anf
-import Base
 import Errors
 import Expr
-import IO
 import Pretty
-import Record
+import Prim.Anf
+import Prim.Base
+import Prim.IO
+import Prim.Record
+import Syntax.Sugared (desugar, sugaredGrammar)
 import TypeChecker
 import Types
-
-import Sugared (desugar, sugaredGrammar)
 
 type PrimTypes = '[BasePrim, RecordPrim, AnfPrim, IOPrim]
 type ValueTypes = '[LambdaValue (Eval IO), BaseValue, RecordValue, AnfValue]

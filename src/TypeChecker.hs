@@ -22,12 +22,12 @@ import Data.Functor.Foldable (cata, para, Fix (..))
 import qualified Data.Set as S
 import Data.Sum
 
-import Expr
-import Types
 import Context (Context)
 import qualified Context as Ctx
 import Errors
-import Position
+import Expr
+import Syntax.Position
+import Types
 import Utils
 
 newtype FreshSupply = FreshSupply { getFreshName :: Int }

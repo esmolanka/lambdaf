@@ -11,7 +11,7 @@
 {-# LANGUAGE TypeOperators              #-}
 {-# LANGUAGE UndecidableInstances       #-}
 
-module Anf where
+module Prim.Anf where
 
 import Prelude hiding ((**))
 
@@ -28,10 +28,10 @@ import qualified Data.Set as S
 import Data.Sum
 import Data.Text.Prettyprint.Doc as PP
 
-import Base (BaseValue(..))
 import Expr
-import Position
 import Pretty
+import Prim.Base (BaseValue(..))
+import Syntax.Position
 import Types
 import Utils
 

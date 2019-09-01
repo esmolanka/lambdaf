@@ -17,19 +17,19 @@ library
   hs-source-dirs:      src
   ghc-options:         -Wall -fno-warn-name-shadowing -fno-warn-unused-do-bind
   exposed-modules:
-    Expr
-    Anf
-    Utils
-    Base
-    IO
-    Record
-    Types
     Context
     Errors
-    Position
+    Expr
     Pretty
+    Prim.Anf
+    Prim.Base
+    Prim.IO
+    Prim.Record
+    Syntax.Position
+    Syntax.Sugared
     TypeChecker
-    Sugared
+    Types
+    Utils
   build-depends:
     base >= 4.7 && < 5, prettyprinter, containers, transformers-compat,
     text, recursion-schemes, fastsum, fused-effects, sexp-grammar, free

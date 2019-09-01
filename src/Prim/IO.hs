@@ -10,7 +10,7 @@
 {-# LANGUAGE TypeOperators              #-}
 {-# LANGUAGE UndecidableInstances       #-}
 
-module IO where
+module Prim.IO where
 
 import Control.Monad.IO.Class
 import Control.Effect.Carrier
@@ -22,10 +22,10 @@ import Data.Sum
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 
-import Base
 import Expr
-import Position
 import Pretty
+import Prim.Base
+import Syntax.Position
 import Types
 import Utils
 

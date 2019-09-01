@@ -10,7 +10,7 @@
 
 {-# OPTIONS_GHC -O0 #-}
 
-module Sugared where
+module Syntax.Sugared where
 
 import Prelude hiding (id)
 
@@ -23,7 +23,6 @@ import Data.Coerce
 import Data.Functor.Foldable (Fix(..), cata, futu)
 import qualified Data.Map as M
 import Data.Proxy
--- import Data.Sum
 import Data.Text (Text, pack, isPrefixOf)
 import GHC.Generics
 
@@ -32,11 +31,11 @@ import Language.SexpGrammar
 import Language.SexpGrammar.Generic
 
 import qualified Expr as Raw
-import qualified Base as Raw (BasePrim(..))
-import qualified Record as Raw (RecordPrim(..))
-import qualified IO as Raw (IOPrim(..))
-import qualified Anf as Raw (AnfPrim(..), EPrim(..))
-import qualified Position as Raw
+import qualified Prim.Base as Raw (BasePrim(..))
+import qualified Prim.Record as Raw (RecordPrim(..))
+import qualified Prim.IO as Raw (IOPrim(..))
+import qualified Prim.Anf as Raw (AnfPrim(..), EPrim(..))
+import qualified Syntax.Position as Raw
 import Expr (Variable(..))
 import Types
 import Utils

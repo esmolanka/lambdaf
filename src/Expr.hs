@@ -28,7 +28,7 @@ import Data.Text.Prettyprint.Doc as PP
 import Data.Void
 
 import Utils
-import Position
+import Syntax.Position
 
 newtype Variable = Variable T.Text
   deriving (Eq, Ord, Show)

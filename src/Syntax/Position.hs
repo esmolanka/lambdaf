@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Position
+module Syntax.Position
   ( Position(..)
   , dummyPos
   ) where

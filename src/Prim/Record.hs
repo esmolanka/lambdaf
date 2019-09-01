@@ -10,7 +10,7 @@
 {-# LANGUAGE TypeOperators              #-}
 {-# LANGUAGE UndecidableInstances       #-}
 
-module Record where
+module Prim.Record where
 
 import Control.Effect.Carrier
 import Control.Effect.Error
@@ -24,8 +24,8 @@ import qualified Data.Text as T
 import Data.Text.Prettyprint.Doc as PP
 
 import Expr
-import Position
 import Pretty
+import Syntax.Position
 import Types
 import Utils
 
