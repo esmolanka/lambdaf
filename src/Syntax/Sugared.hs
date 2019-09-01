@@ -136,7 +136,7 @@ desugar = resolvePrimitives . futu coalg
             ]
 
       Fix (MkTuple pos a b cs) ->
-        let ultimate = last (a : cs)
+        let ultimate = last (a : b : cs)
             elems    = init (a : b : cs)
             primPair = Free (Raw.Prim (dsPos pos) (inject' Raw.MkPair))
             app f x = Free (Raw.App (dsPos pos) f x)
