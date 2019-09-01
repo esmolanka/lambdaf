@@ -1,0 +1,2 @@
+(do (writeln "Enter a file name to evaluate (should return Double):")
+    (link-double (readln)))

@@ -1,2 +1,2 @@
 (let ([get-bar (lambda (r) (:bar r :default 0))])
-  (get-bar {:baz 42}))
+  {:bar 42})

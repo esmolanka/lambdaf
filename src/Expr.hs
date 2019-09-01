@@ -72,7 +72,6 @@ eval :: forall m sig (p :: [*]) (v :: [* -> *]).
   , Member (Reader (M.Map Variable (Value v))) sig
   , Carrier sig m
   , EvalPrim m v (Sum (Map Const p))
-  , Apply Show1 v
   , LambdaValue m :< v
   ) => Expr p -> m (Value v)
 eval = cata alg
@@ -94,7 +93,7 @@ eval = cata alg
         f' <- f
         case project (unfix f') of
           Just (VLam f'') -> e >>= f''
-          _ -> throwError $ show pos ++ ": Could not apply to a non-function: " ++ show (unfix f')
+          _ -> throwError $ show pos ++ ": Could not apply to a non-function"
 
       Let _pos x e body -> do
         v <- e

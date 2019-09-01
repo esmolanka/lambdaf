@@ -36,11 +36,12 @@ import Prim.Anf
 import Prim.Base
 import Prim.IO
 import Prim.Record
+import Prim.Link
 import Syntax.Sugared (desugar, sugaredGrammar)
 import TypeChecker
 import Types
 
-type PrimTypes = '[BasePrim, RecordPrim, AnfPrim, IOPrim]
+type PrimTypes = '[BasePrim, RecordPrim, AnfPrim, IOPrim, LinkPrim]
 type ValueTypes = '[LambdaValue (Eval IO), BaseValue, RecordValue, AnfValue]
 
 newtype Eval m a = Eval

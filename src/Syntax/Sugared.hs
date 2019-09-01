@@ -35,6 +35,7 @@ import qualified Prim.Base as Raw (BasePrim(..))
 import qualified Prim.Record as Raw (RecordPrim(..))
 import qualified Prim.IO as Raw (IOPrim(..))
 import qualified Prim.Anf as Raw (AnfPrim(..), EPrim(..))
+import qualified Prim.Link.Types as Raw (LinkPrim(..))
 import qualified Syntax.Position as Raw
 import Expr (Variable(..))
 import Types
@@ -77,7 +78,7 @@ data SugaredF e
 dsPos :: Position -> Raw.Position
 dsPos (Position fn l c) = Raw.Position (pack fn) l c l c
 
-desugar :: forall p. (Raw.BasePrim :<< p, Raw.RecordPrim :<< p, Raw.IOPrim :<< p, Raw.AnfPrim :<< p) => Sugared -> Raw.Expr p
+desugar :: forall p. (Raw.BasePrim :<< p, Raw.RecordPrim :<< p, Raw.IOPrim :<< p, Raw.AnfPrim :<< p, Raw.LinkPrim :<< p) => Sugared -> Raw.Expr p
 desugar = resolvePrimitives . futu coalg
   where
     dummyVar = Variable "_"
@@ -188,7 +189,7 @@ desugar = resolvePrimitives . futu coalg
              Pure{} -> error "Wooot!"
 
 
-primitives :: (Raw.BasePrim :<< p, Raw.IOPrim :<< p, Raw.AnfPrim :<< p) => proxy p -> M.Map Variable (Int, Sum' p)
+primitives :: (Raw.BasePrim :<< p, Raw.IOPrim :<< p, Raw.AnfPrim :<< p, Raw.LinkPrim :<< p) => proxy p -> M.Map Variable (Int, Sum' p)
 primitives _ = M.fromList
   [ (Variable "+",       (0, inject' Raw.Add))
   , (Variable "readnum", (0, inject' Raw.ReadDouble))
@@ -196,9 +197,10 @@ primitives _ = M.fromList
   , (Variable "writeln", (0, inject' Raw.WriteLn))
   , (Variable "^",       (0, inject' Raw.EConst))
   , (Variable "^+",      (0, inject' (Raw.EPrim Raw.EAdd)))
+  , (Variable "link-double", (0, inject' (Raw.Link (Fix (T (TDouble))))))
   ]
 
-resolvePrimitives :: forall p. (Raw.BasePrim :<< p, Raw.IOPrim :<< p, Raw.AnfPrim :<< p) => Raw.Expr p -> Raw.Expr p
+resolvePrimitives :: forall p. (Raw.BasePrim :<< p, Raw.IOPrim :<< p, Raw.AnfPrim :<< p, Raw.LinkPrim :<< p) => Raw.Expr p -> Raw.Expr p
 resolvePrimitives expr = run . runReader (primitives (Proxy @p)) $ (cata alg expr)
   where
     alg :: forall m sig r.
