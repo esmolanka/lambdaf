@@ -97,13 +97,21 @@ desugar = resolvePrimitives . futu coalg
     mkApp pos f args =
       foldl (\acc arg -> Free $ Raw.App pos acc arg) f args
 
+    unFree :: forall f a. Free f a -> f (Free f a)
+    unFree = \case
+      Free x -> x
+      Pure _ -> error "Desugaring coalgebra was not able to generate even a single layer of desugaring!"
+
     coalg :: Sugared -> Raw.ExprF p (Free (Raw.ExprF p) Sugared)
     coalg = \case
-      Fix (Var pos var)       -> Raw.Ref (dsPos pos) var
+      Fix (Var pos var) ->
+        Raw.Ref (dsPos pos) var
 
-      Fix (Lambda pos b bs e) -> let Free x = mkLambda (dsPos pos) (b:bs) (Pure e) in x
+      Fix (Lambda pos b bs e) ->
+        unFree $ mkLambda (dsPos pos) (b:bs) (Pure e)
 
-      Fix (App pos f a as)    -> let Free x = mkApp (dsPos pos) (Pure f) (map Pure (a:as)) in x
+      Fix (App pos f a as) ->
+        unFree $ mkApp (dsPos pos) (Pure f) (map Pure (a:as))
 
       Fix (Let pos b bs e) ->
         let (name, expr) = desugarBinding b
@@ -120,29 +128,32 @@ desugar = resolvePrimitives . futu coalg
           LitUnit   -> Raw.Prim (dsPos pos) (inject' Raw.MkUnit)
 
       Fix (If pos cond tr fls) ->
-        let Free x =
-              mkApp (dsPos pos) (Free $ Raw.Prim (dsPos pos) (inject' Raw.If))
-                [ Pure cond
-                , mkLambda (dsPos pos) [dummyVar] (Pure tr)
-                , mkLambda (dsPos pos) [dummyVar] (Pure fls)
-                ]
-        in x
+        unFree $
+          mkApp (dsPos pos) (Free $ Raw.Prim (dsPos pos) (inject' Raw.If))
+            [ Pure cond
+            , mkLambda (dsPos pos) [dummyVar] (Pure tr)
+            , mkLambda (dsPos pos) [dummyVar] (Pure fls)
+            ]
 
       Fix (MkTuple pos a b cs) ->
         let ultimate = last (a : cs)
             elems    = init (a : b : cs)
             primPair = Free (Raw.Prim (dsPos pos) (inject' Raw.MkPair))
             app f x = Free (Raw.App (dsPos pos) f x)
-        in case foldr (\x rest_ -> (primPair `app` Pure x) `app` rest_) (Pure ultimate) elems of
-             Free x -> x
-             Pure{} -> error "Woot"
+        in unFree $
+             foldr
+               (\x rest_ -> (primPair `app` Pure x) `app` rest_)
+               (Pure ultimate)
+               elems
 
       Fix (MkRec pos elems) ->
         let empty = Raw.Prim (dsPos pos) (inject' Raw.RecordNil)
             ext lbl p r = Raw.App (dsPos pos) (Free (Raw.App (dsPos pos) (Free (Raw.Prim (dsPos pos) (inject' (Raw.RecordExtend lbl)))) p)) r
-        in case foldr (\(lbl, e) rest_ -> Free $ ext lbl (Pure e) rest_) (Free empty) elems of
-             Free x -> x
-             Pure{} -> error "Woot"
+        in unFree $
+             foldr
+               (\(lbl, e) rest_ -> Free $ ext lbl (Pure e) rest_)
+               (Free empty)
+               elems
 
       Fix (RecProj pos label record) ->
         Raw.App (dsPos pos)
@@ -170,8 +181,7 @@ desugar = resolvePrimitives . futu coalg
           (Free (Raw.Prim (dsPos pos) (inject' Raw.MkUnit)))
 
       Fix (DoBlock pos stmts) ->
-        let mkSeq p x a b = Free (Raw.App (dsPos p) (Free (Raw.Lambda (dsPos p) x b)) (Pure a))
-        in
+        let mkSeq p x a b = Free (Raw.App (dsPos p) (Free (Raw.Lambda (dsPos p) x b)) (Pure a)) in
         case stmts of
           [] -> error "Impossible empty do-block"
           (_:_) ->
@@ -180,24 +190,23 @@ desugar = resolvePrimitives . futu coalg
                         IgnoringBinding e -> (dummyVar, e)
                         OrdinarySeqBinding x e -> (x, e)
                   in mkSeq pos var expr rest_
-                block = foldr bind
+            in unFree $
+                foldr bind
                   (case last stmts of
                       IgnoringBinding e -> mkSeq pos dummyVar e (Free (Raw.Ref (dsPos pos) dummyVar))
-                      OrdinarySeqBinding x e -> mkSeq pos x e (Free (Raw.Ref (dsPos pos) x))) (init stmts)
-            in case block of
-                 Free x -> x
-                 Pure{} -> error "Impossible pure"
+                      OrdinarySeqBinding x e -> mkSeq pos x e (Free (Raw.Ref (dsPos pos) x)))
+                  (init stmts)
 
       Fix (Loop pos x xs body) ->
         let primLoop = Free (Raw.Prim (dsPos pos) (inject' Raw.ELoop))
             app f a = Free (Raw.App (dsPos pos) f a)
-            mkLoop = (\b' rest_ -> primLoop `app` (Free $ Raw.Lambda (dsPos pos) b' rest_))
-        in case foldr mkLoop (Pure body) (reverse (x : xs)) of
-             Free a -> a
-             Pure{} -> error "Wooot!"
+        in unFree $
+             foldr
+               (\b' rest_ -> primLoop `app` (Free $ Raw.Lambda (dsPos pos) b' rest_))
+               (Pure body)
+               (reverse (x : xs))
 
-
-primitives ::
+primitives :: forall p proxy.
   ( Raw.BasePrim :<< p
   , Raw.IOPrim :<< p
   , Raw.AnfPrim :<< p
