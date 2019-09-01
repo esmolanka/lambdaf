@@ -18,7 +18,6 @@ import Control.Arrow (first)
 import Control.Category (id, (>>>))
 import Control.Monad.Free
 import Control.Effect.Reader
-import Control.Effect.Pure
 
 import Data.Coerce
 import Data.Functor.Foldable (Fix(..), cata, futu)
@@ -29,15 +28,14 @@ import Data.Text (Text, pack, isPrefixOf)
 import GHC.Generics
 
 import Language.Sexp.Located (Position(..))
--- import qualified Language.SexpGrammar as S
 import Language.SexpGrammar
 import Language.SexpGrammar.Generic
 
 import qualified Expr as Raw
-import qualified Base as Raw
-import qualified Record as Raw
-import qualified IO as Raw
--- import qualified Anf as Raw
+import qualified Base as Raw (BasePrim(..))
+import qualified Record as Raw (RecordPrim(..))
+import qualified IO as Raw (IOPrim(..))
+import qualified Anf as Raw (AnfPrim(..), EPrim(..))
 import qualified Position as Raw
 import Expr (Variable(..))
 import Types
@@ -49,9 +47,7 @@ data Literal
   | LitUnit
     deriving (Generic)
 
-data LetBinding e
-  = OrdinaryBinding Variable e
-  {- | RecursiveBinding Variable Variable [Variable] e -}
+data LetBinding e = LetBinding Variable e
     deriving (Generic)
 
 data SeqBinding e
@@ -67,19 +63,22 @@ data SugaredF e
   | Let     Position (LetBinding e) [(LetBinding e)] e
   | Literal Position Literal
   | If      Position e e e
-  -- | MkList  Position [e]
+  | MkTuple Position e e [e]
+  -- {- | MkList  Position [e] -}
   | MkRec   Position [(Label, e)]
   | RecProj Position Label e
+  | RecDef  Position Label e e
   | RecExt  Position Label e e
   | Delay   Position e
   | Force   Position e
   | DoBlock Position [SeqBinding e]
+  | Loop    Position Variable [Variable] e
     deriving (Generic)
 
 dsPos :: Position -> Raw.Position
 dsPos (Position fn l c) = Raw.Position (pack fn) l c l c
 
-desugar :: forall p. (Raw.BasePrim :<< p, Raw.RecordPrim :<< p, Raw.IOPrim :<< p) => Sugared -> Raw.Expr p
+desugar :: forall p. (Raw.BasePrim :<< p, Raw.RecordPrim :<< p, Raw.IOPrim :<< p, Raw.AnfPrim :<< p) => Sugared -> Raw.Expr p
 desugar = resolvePrimitives . futu coalg
   where
     dummyVar = Variable "_"
@@ -104,15 +103,7 @@ desugar = resolvePrimitives . futu coalg
              (foldr (\(x, a) rest_ -> Free $ Raw.Let (dsPos pos) x a rest_) (Pure e) (map desugarBinding bs))
         where
           desugarBinding :: LetBinding Sugared -> (Variable, Free (Raw.ExprF p) Sugared)
-          desugarBinding = \case
-            OrdinaryBinding n expr -> (n, Pure expr)
-            -- RecursiveBinding n var vars expr -> (n, Raw.LetBinding, body)
-            --   where
-            --     avs = map (const dummyVar) (var:vars)
-            --     refs = reverse $ zipWith (\var n -> Free $ Raw.Var pos var n) avs [0..]
-            --     body = mkLambda pos avs $ mkApp pos fixpoint (innerBody:refs)
-            --     fixpoint = Free $ Raw.Const pos Raw.Fixpoint
-            --     innerBody = mkLambda pos (n:var:vars) (Pure expr)
+          desugarBinding (LetBinding n expr) = (n, Pure expr)
 
       Fix (Literal pos lit) ->
         case lit of
@@ -129,6 +120,15 @@ desugar = resolvePrimitives . futu coalg
                 ]
         in x
 
+      Fix (MkTuple pos a b cs) ->
+        let ultimate = last (a : cs)
+            elems    = init (a : b : cs)
+            primPair = Free (Raw.Prim (dsPos pos) (inject' Raw.MkPair))
+            app f x = Free (Raw.App (dsPos pos) f x)
+        in case foldr (\x rest_ -> (primPair `app` Pure x) `app` rest_) (Pure ultimate) elems of
+             Free x -> x
+             Pure{} -> error "Woot"
+
       Fix (MkRec pos elems) ->
         let empty = Raw.Prim (dsPos pos) (inject' Raw.RecordNil)
             ext lbl p r = Raw.App (dsPos pos) (Free (Raw.App (dsPos pos) (Free (Raw.Prim (dsPos pos) (inject' (Raw.RecordExtend lbl)))) p)) r
@@ -139,6 +139,11 @@ desugar = resolvePrimitives . futu coalg
       Fix (RecProj pos label record) ->
         Raw.App (dsPos pos)
           (Free (Raw.Prim (dsPos pos) (inject' (Raw.RecordSelect label))))
+          (Pure record)
+
+      Fix (RecDef pos label record def) ->
+        Raw.App (dsPos pos)
+          (Free (Raw.App (dsPos pos) (Free (Raw.Prim (dsPos pos) (inject' (Raw.RecordDefault label)))) (Pure def)))
           (Pure record)
 
       Fix (RecExt pos label record payload) ->
@@ -157,8 +162,7 @@ desugar = resolvePrimitives . futu coalg
           (Free (Raw.Prim (dsPos pos) (inject' Raw.MkUnit)))
 
       Fix (DoBlock pos stmts) ->
-        let -- mkForce p a = Free (Raw.App p (Pure a) (Free (Raw.Prim p (inject' Raw.MkUnit))))
-            mkSeq p x a b = Free (Raw.App (dsPos p) (Free (Raw.Lambda (dsPos p) x b)) (Pure a))
+        let mkSeq p x a b = Free (Raw.App (dsPos p) (Free (Raw.Lambda (dsPos p) x b)) (Pure a))
         in
         case stmts of
           [] -> error "Impossible empty do-block"
@@ -176,20 +180,33 @@ desugar = resolvePrimitives . futu coalg
                  Free x -> x
                  Pure{} -> error "Impossible pure"
 
+      Fix (Loop pos x xs body) ->
+        let primLoop = Free (Raw.Prim (dsPos pos) (inject' Raw.ELoop))
+            app f a = Free (Raw.App (dsPos pos) f a)
+            mkLoop = (\b' rest_ -> primLoop `app` (Free $ Raw.Lambda (dsPos pos) b' rest_))
+        in case foldr mkLoop (Pure body) (reverse (x : xs)) of
+             Free a -> a
+             Pure{} -> error "Wooot!"
 
 
-primitives :: (Raw.BasePrim :<< p, Raw.IOPrim :<< p) => proxy p -> M.Map Variable (Int, Sum' p)
+primitives :: (Raw.BasePrim :<< p, Raw.IOPrim :<< p, Raw.AnfPrim :<< p) => proxy p -> M.Map Variable (Int, Sum' p)
 primitives _ = M.fromList
-  [ (Variable "+",     (0, inject' Raw.Add))
+  [ (Variable "+",       (0, inject' Raw.Add))
   , (Variable "readnum", (0, inject' Raw.ReadDouble))
-  , (Variable "readln", (0, inject' Raw.ReadLn))
+  , (Variable "readln",  (0, inject' Raw.ReadLn))
   , (Variable "writeln", (0, inject' Raw.WriteLn))
+  , (Variable "^",       (0, inject' Raw.EConst))
+  , (Variable "^+",      (0, inject' (Raw.EPrim Raw.EAdd)))
   ]
 
-resolvePrimitives :: forall p. (Raw.BasePrim :<< p, Raw.IOPrim :<< p) => Raw.Expr p -> Raw.Expr p
+resolvePrimitives :: forall p. (Raw.BasePrim :<< p, Raw.IOPrim :<< p, Raw.AnfPrim :<< p) => Raw.Expr p -> Raw.Expr p
 resolvePrimitives expr = run . runReader (primitives (Proxy @p)) $ (cata alg expr)
   where
-    alg :: forall r. (r ~ M.Map Variable (Int, Sum' p)) => Raw.ExprF p (ReaderC r PureC (Raw.Expr p)) -> ReaderC r PureC (Raw.Expr p)
+    alg :: forall m sig r.
+           ( r ~ M.Map Variable (Int, Sum' p)
+           , Member (Reader r) sig
+           , Carrier sig m
+           ) => Raw.ExprF p (m (Raw.Expr p)) -> m (Raw.Expr p)
     alg = \case
       Raw.Ref pos var -> do
         val <- asks @r (M.lookup var)
@@ -225,7 +242,7 @@ varGrammar =
   where
     parseVar :: Text -> Either Mismatch Variable
     parseVar t =
-      if t `elem` ["lambda","let","if","record","delay","do","=","?","tt","ff"] ||
+      if t `elem` ["lambda","let","if","do","loop","=","<-","**","tt","ff"] ||
          ":" `isPrefixOf` t
       then Left (unexpected t)
       else Right (Variable t)
@@ -236,20 +253,11 @@ labelGrammar = keyword >>> iso coerce coerce
 
 
 bindingGrammar :: Grammar Position (Sexp :- t) (LetBinding Sugared :- t)
-bindingGrammar = match
-  $ With (\ordinary ->
-            bracketList (
-             el varGrammar >>>
-             el sugaredGrammar) >>>
-            ordinary)
-  -- $ With (\recursive ->
-  --           bracketList (
-  --            el (sym ":rec") >>>
-  --            el varGrammar >>>
-  --            el (list (el varGrammar >>> rest varGrammar)) >>>
-  --            el sugaredGrammar) >>>
-  --           recursive)
-  $ End
+bindingGrammar = with $ \bnd ->
+  bracketList (
+    el varGrammar >>>
+    el sugaredGrammar) >>>
+  bnd
 
 
 seqStmtGrammar :: Grammar Position (Sexp :- t) (SeqBinding Sugared :- t)
@@ -339,6 +347,15 @@ sugaredGrammar = fixG $ match
               el sugaredGrammar) >>>
              ifp)
 
+  $ With (\mktuple ->
+            position >>>
+            swap >>>
+            list (
+             el (sym "**") >>>
+             el sugaredGrammar >>>
+             el sugaredGrammar >>>
+             rest sugaredGrammar) >>> mktuple)
+
   -- $ With (\mklst ->
   --            annotated "list literal" $
   --            position >>>
@@ -367,6 +384,17 @@ sugaredGrammar = fixG $ match
                el sugaredGrammar) >>>
              recprj)
 
+  $ With (\recdef ->
+             annotated "record selection with default" $
+             position >>>
+             swap >>>
+             list (
+               el labelGrammar >>>
+               el sugaredGrammar >>>
+               el (sym ":default") >>>
+               el sugaredGrammar) >>>
+             recdef)
+
   $ With (\recext ->
              annotated "record extension" $
              position >>>
@@ -374,7 +402,7 @@ sugaredGrammar = fixG $ match
              list (
                el labelGrammar >>>
                el sugaredGrammar >>>
-               el (sym ":extend") >>>
+               el (sym "=") >>>
                el sugaredGrammar) >>>
              recext)
 
@@ -399,6 +427,18 @@ sugaredGrammar = fixG $ match
                    rest seqStmtGrammar >>>
                    onTail cons) >>>
              doblock)
+
+  $ With (\loop ->
+             annotated "loop" $
+             position >>>
+             swap >>>
+             list (
+               el (sym "loop") >>>
+               el (list (
+                     el varGrammar >>>
+                     rest varGrammar)) >>>
+               el sugaredGrammar) >>>
+             loop)
 
   $ End
 

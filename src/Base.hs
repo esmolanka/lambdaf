@@ -167,9 +167,7 @@ instance TypePrim (Const BasePrim) where
       forall Star $ \b ->
       effect $ \e1 ->
       effect $ \e2 ->
-      mono $
-        (a, e1) ~>
-        (b, e2) ~> Fix (TPair a b)
+      mono $ (a, e1) ~> (b, e2) ~> Fix (TPair a b)
     Const (MkDouble _) ->
       mono $ Fix $ T $ TDouble
     Const (MkText _) ->

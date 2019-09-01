@@ -31,6 +31,7 @@ data RecordPrim
   = RecordNil
   | RecordExtend Label
   | RecordSelect Label
+  | RecordDefault Label
 
 data RecordValue e
   = VRecord (M.Map Label e)
@@ -72,6 +73,16 @@ instance ( Member (Error String) sig
                 Nothing -> throwError ("RecordSelect: label not found " ++ show lbl')
             _ -> throwError "RecordSelect: not a record"
 
+      Const (RecordDefault lbl) ->
+        pure $ mkVLam @m $ \d ->
+        pure $ mkVLam @m $ \r ->
+          case projRecord r of
+            Just (VRecord r') ->
+              case M.lookup lbl r' of
+                Just a  -> pure a
+                Nothing -> pure d
+            _ -> throwError "RecordDefault: not a record"
+
     where
       projRecord = project @RecordValue . unfix
 
@@ -82,18 +93,27 @@ instance TypePrim (Const RecordPrim) where
     Const (RecordExtend label) ->
       forall Star $ \a ->
       forall Star $ \b ->
+      forall Presence $ \p ->
       forall Row  $ \r ->
       effect $ \e1 ->
       effect $ \e2 ->
       mono $
         (a, e1) ~>
-        (Fix $ TRecord $ Fix $ TRowExtend label (Fix TAbsent) b r, e2) ~>
+        (Fix $ TRecord $ Fix $ TRowExtend label p b r, e2) ~>
         (Fix $ TRecord $ Fix $ TRowExtend label (Fix TPresent) a r)
     Const (RecordSelect label) ->
       forall Star $ \a ->
       forall Row  $ \r ->
       effect $ \e ->
       mono $ (Fix $ TRecord $ Fix $ TRowExtend label (Fix TPresent) a r, e) ~> a
+    Const (RecordDefault label) ->
+      forall Star $ \a ->
+      forall Presence $ \p ->
+      forall Row  $ \r ->
+      effect $ \e1 ->
+      effect $ \e2 ->
+      mono $
+      (a, e1) ~> (Fix $ TRecord $ Fix $ TRowExtend label p a r, e2) ~> a
 
 ----------------------------------------------------------------------
 
