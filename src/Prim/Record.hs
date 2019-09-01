@@ -14,7 +14,6 @@ module Prim.Record where
 
 import Control.Effect.Carrier
 
-import Data.Functor.Classes
 import Data.Functor.Const
 import Data.Functor.Foldable (Fix (..), unfix)
 import qualified Data.Map as M
@@ -39,21 +38,14 @@ data RecordValue e
 mkVRecord :: (RecordValue :< v) => M.Map Label (Value v) -> Value v
 mkVRecord = Fix . inject . VRecord
 
-instance Show1 RecordValue where
-  liftShowsPrec sp _sl _n = \case
-    VRecord x ->
-      let showBody [] = id
-          showBody lst =
-            foldr1 (\a b -> a . showString ", " . b) $
-              map (\(Label lbl, el) -> shows lbl . showString " = " . sp 0 el) lst
-      in showString "{" . showBody (M.toList x) . showString "}"
-
 instance Pretty1 RecordValue where
   liftPretty pp = \case
     VRecord x ->
-      group $ braces $ align $ vsep $
-      punctuate "," $
-      map (\(lbl, v) -> ppLabel lbl <+> "=" <+> pp v) (M.toList x)
+      group $ align $
+      enclose (lbrace <> space) (line <> rbrace) $ vcat $
+      zipWith (<>)
+        (mempty : repeat (comma <> space))
+        (map (\(lbl, v) -> nest 4 $ vsep [ppLabel lbl <+> "=", pp v]) (M.toList x))
 
 instance PrettyPrim (Const RecordPrim) where
   prettyPrim = \case
