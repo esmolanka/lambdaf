@@ -20,17 +20,12 @@ import qualified Data.Set as S
 import Data.Sum
 import Data.Void
 import Data.String
-import Data.Text (Text, unpack)
-
--- import Utils
+import Data.Text (Text)
 
 import GHC.Generics
 
 newtype Label = Label Text
-    deriving (Eq, Ord)
-
-instance Show Label where
-  showsPrec _ (Label x) = showString "‹" . showString (unpack x) . showString "›"
+    deriving (Show, Eq, Ord)
 
 instance IsString Label where
   fromString = Label . fromString

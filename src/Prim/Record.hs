@@ -13,22 +13,19 @@
 module Prim.Record where
 
 import Control.Effect.Carrier
-import Control.Effect.Error
 
 import Data.Functor.Classes
 import Data.Functor.Const
 import Data.Functor.Foldable (Fix (..), unfix)
 import qualified Data.Map as M
 import Data.Sum
-import qualified Data.Text as T
 import Data.Text.Prettyprint.Doc as PP
 
 import Expr
+import Eval
 import Pretty
-import Syntax.Position
 import Types
 import Utils
-
 
 data RecordPrim
   = RecordNil
@@ -65,7 +62,7 @@ instance PrettyPrim (Const RecordPrim) where
     Const (RecordSelect lbl)  -> "RecordSelect" <> angles (ppLabel lbl)
     Const (RecordDefault lbl) -> "RecordDefault" <> angles (ppLabel lbl)
 
-instance ( Member (Error String) sig
+instance ( Member RuntimeErrorEffect sig
          , Carrier sig m
          , LambdaValue m :< v
          , RecordValue :< v
@@ -131,14 +128,3 @@ instance TypePrim (Const RecordPrim) where
       effect $ \e2 ->
       mono $
       (a, e1) ~> (Fix $ TRecord $ Fix $ TRowExtend label p a r, e2) ~> a
-
-----------------------------------------------------------------------
-
-rnil :: (RecordPrim :<< p) => Expr p
-rnil = Fix (Prim dummyPos (inject' RecordNil))
-
-rext :: (RecordPrim :<< p) => String -> Expr p -> Expr p -> Expr p
-rext lbl a r = Fix (Prim dummyPos (inject' (RecordExtend (Label (T.pack lbl))))) ! a ! r
-
-rsel :: (RecordPrim :<< p) => String -> Expr p -> Expr p
-rsel lbl r = Fix (Prim dummyPos (inject' (RecordSelect (Label (T.pack lbl))))) ! r

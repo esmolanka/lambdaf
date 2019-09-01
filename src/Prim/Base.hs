@@ -10,12 +10,19 @@
 {-# LANGUAGE TypeOperators              #-}
 {-# LANGUAGE UndecidableInstances       #-}
 
-module Prim.Base where
+module Prim.Base
+  ( BaseValue(..)
+  , mkVDbl
+  , mkVText
+  , mkVPair
+  , mkVUnit
+  , projBase
+  , BasePrim(..)
+  , partialEff
+  ) where
 
 import Control.Effect.Carrier
-import Control.Effect.Error
 
-import Data.Functor.Classes
 import Data.Functor.Const
 import Data.Functor.Foldable (Fix (..), unfix)
 import Data.Sum
@@ -25,8 +32,8 @@ import Data.Text.Prettyprint.Doc as PP
 
 import Expr
 import Pretty
-import Syntax.Position
 import Types
+import Eval
 import Utils
 
 data BasePrim
@@ -58,12 +65,8 @@ mkVPair a b = Fix . inject $ VPair a b
 mkVUnit :: (BaseValue :< v) => Value v
 mkVUnit = Fix . inject $ VUnit
 
-instance Show1 BaseValue where
-  liftShowsPrec sp _sl _n = \case
-    VDbl x    -> showString "#" . shows x
-    VText x   -> shows x
-    VPair a b -> showString "(" . sp 0 a . showString " ** " . sp 0 b . showString ")"
-    VUnit     -> showString "Unit"
+projBase :: (BaseValue :< v) => Value v -> Maybe (BaseValue (Value v))
+projBase = project @BaseValue . unfix
 
 instance Pretty1 BaseValue where
   liftPretty pp = \case
@@ -84,7 +87,7 @@ instance PrettyPrim (Const BasePrim) where
     Const (MkText s)   -> pretty (show s)
     Const MkUnit       -> "Unit"
 
-instance ( Member (Error String) sig
+instance ( Member RuntimeErrorEffect sig
          , Carrier sig m
          , LambdaValue m :< v
          , BaseValue :< v
@@ -147,15 +150,9 @@ instance ( Member (Error String) sig
         pure $ mkVUnit
     where
       forceDelayed l =
-        case projLam l of
+        case projLambda l of
           Just (VLam f) -> f mkVUnit
           Nothing -> evalError "Cannot force a non-lambda"
-
-      projLam :: (LambdaValue m :< v) => Value v -> Maybe (LambdaValue m (Value v))
-      projLam = project @(LambdaValue m) . unfix
-
-      projBase :: (BaseValue :< v) => Value v -> Maybe (BaseValue (Value v))
-      projBase = project @BaseValue . unfix
 
 partialEff :: Label
 partialEff = Label (T.pack "partial")
@@ -206,22 +203,3 @@ instance TypePrim (Const BasePrim) where
       mono $ Fix $ T $ TText
     Const MkUnit ->
       mono $ Fix $ T $ TUnit
-
-----------------------------------------------------------------------
-
-prim :: (BasePrim :<< p) => BasePrim -> Expr p
-prim p = Fix (Prim dummyPos (inject' p))
-
-if_ :: (BasePrim :<< p) => Expr p -> Expr p -> Expr p -> Expr p
-if_ c t f = prim If ! c ! t ! f
-
-lit :: (BasePrim :<< p) => Double -> Expr p
-lit n = prim (MkDouble n)
-
-txt :: (BasePrim :<< p) => String -> Expr p
-txt t = prim (MkText (T.pack t))
-
-(**) :: (BasePrim :<< p) => Expr p -> Expr p -> Expr p
-(**) a b = prim MkPair ! a ! b
-
-infixr 3 **

@@ -11,29 +11,40 @@
 {-# LANGUAGE TypeOperators              #-}
 {-# LANGUAGE UndecidableInstances       #-}
 
-module Prim.Anf where
+module Prim.Anf
+  ( AnfEffect
+  , AnfEffectC
+  , runAnf
+  , AnfPrim(..)
+  , EPrim(..)
+  , AnfValue(..)
+  , mkVAnf
+  , projAnf
+  ) where
 
 import Prelude hiding ((**))
 
 import Control.Effect.Carrier
-import Control.Effect.Error
-import Control.Effect.Reader
 import Control.Effect.State
 
-import Data.Functor.Classes
 import Data.Functor.Const
 import Data.Functor.Foldable (Fix (..), unfix)
-import qualified Data.Map as M
 import qualified Data.Set as S
 import Data.Sum
 import Data.Text.Prettyprint.Doc as PP
 
+import Eval
 import Expr
 import Pretty
-import Prim.Base (BaseValue(..))
-import Syntax.Position
+import Prim.Base
 import Types
 import Utils
+
+type AnfEffect = State EVar
+type AnfEffectC = StateC EVar
+
+runAnf :: (Monad m) => AnfEffectC m a -> m a
+runAnf = evalState (EVar 100)
 
 data AnfPrim
   = EConst
@@ -52,10 +63,8 @@ mkVAnf = Fix . inject . VAnf
 mkVStore :: (AnfValue :< v) => EVar -> EExpr -> Value v -> Value v
 mkVStore x s r = Fix (inject (VStore x s r))
 
-instance Show1 AnfValue where
-  liftShowsPrec sp _ _ = \case
-    VAnf e -> showString "{" . shows e . showString "}"
-    VStore x s r -> showString "{@" . shows x . showString " = " . shows s . showString "; " . sp 0 r . showString "}"
+projAnf :: (AnfValue :< v) => Value v -> Maybe (AnfValue (Value v))
+projAnf = project @AnfValue . unfix
 
 instance Pretty1 AnfValue where
   liftPretty pp = \case
@@ -72,9 +81,9 @@ instance PrettyPrim (Const AnfPrim) where
     Const ELoop -> "ELoop"
 
 instance
-  ( Member (Error String) sig
-  , Member (Reader (M.Map Variable (Value v))) sig
-  , Member (State EVar) sig
+  ( Member (RuntimeErrorEffect) sig
+  , Member (EnvEffect v) sig
+  , Member (AnfEffect) sig
   , Carrier sig m
   , LambdaValue m :< v
   , BaseValue :< v
@@ -101,37 +110,27 @@ instance
 
     Const ELoop ->
       pure $ mkVLam @m $ \f ->
-        case projLam f of
+        case projLambda f of
           Just (VLam f') -> do
             stateVar <- fresh
             res <- f' (mkVAnf (EIntro stateVar (EIn (ERef stateVar))))
             let store :: Value v -> m (Value v)
                 store v = case (projBase v, projAnf v) of
-                  (_, Just (VStore x s r))  -> mkVStore x s <$> store r
+                  (_, Just (VStore x s r)) -> do
+                    r' <- store r
+                    case projAnf r' of
+                      Just (VAnf r'') -> mkVAnf <$> eapply (EStore x) (EIntro x s) r''
+                      _ -> pure (mkVStore x s r')
                   (Just (VPair s r), _) ->
                     case projAnf s of
-                      (Just (VAnf s')) -> pure (mkVStore stateVar s' r)
-                      _                -> evalError $ "Loop result is not a VStore or VPair"
-                  _               -> evalError $ "Loop result is not a VStore or VPair"
-
-                flatten :: Value v -> m EExpr
-                flatten v = case projAnf v of
-                  Just (VStore x s r) -> eapply (EStore x) (EIntro x s) =<< flatten r
-                  Just (VAnf x)       -> pure x
-                  _                   -> evalError "Can't flatten yet"
-
-            (store res >>= flatten >>= pure . mkVAnf) `catchError` (\(_ :: String) -> store res)
-
+                      Just (VAnf s') ->
+                        case projAnf r of
+                          Just (VAnf r') -> mkVAnf <$> eapply (EStore stateVar) (EIntro stateVar s') r'
+                          _ -> pure (mkVStore stateVar s' r)
+                      _ -> evalError $ "Loop result is not a VStore or VPair"
+                  _ -> evalError $ "Loop result is not a VStore or VPair"
+            store res
           _ -> evalError "Loop body is not a function!"
-    where
-      projLam :: (LambdaValue m :< v) => Value v -> Maybe (LambdaValue m (Value v))
-      projLam = project @(LambdaValue m) . unfix
-
-      projBase :: (BaseValue :< v) => Value v -> Maybe (BaseValue (Value v))
-      projBase = project @BaseValue . unfix
-
-      projAnf :: (AnfValue :< v) => Value v -> Maybe (AnfValue (Value v))
-      projAnf = project @AnfValue . unfix
 
 instance TypePrim (Const AnfPrim) where
   typePrim = \case
@@ -147,9 +146,9 @@ instance TypePrim (Const AnfPrim) where
         (Fix (TExpr (Fix (TE TEDouble))), e1) ~>
         (Fix (TExpr (Fix (TE TEDouble))), e2) ~> Fix (TExpr (Fix (TE TEDouble)))
 
-    Const (EPrim (EStore _)) -> error "EStore"
+    Const (EPrim (EStore _)) ->
+      error "EStore should not apprear in expressions"
 
-    -- loop : (Expr a -> (Expr a, b)) -> b
     Const ELoop ->
       effect $ \e1 ->
       forall EStar $ \a ->
@@ -160,7 +159,8 @@ instance TypePrim (Const AnfPrim) where
 ----------------------------------------------------------------------
 -- ANF
 
-type EVar = Int
+newtype EVar = EVar Int
+  deriving (Show, Eq, Ord)
 
 data EPrim = EAdd | EStore EVar
   deriving (Show)
@@ -179,7 +179,7 @@ data EValue
 fresh :: (Member (State EVar) sig, Carrier sig m) => m EVar
 fresh = do
   x <- get
-  modify (succ :: EVar -> EVar)
+  modify (\(EVar n) -> EVar (succ n))
   return x
 
 eapply :: (Member (State EVar) sig, Carrier sig m) => EPrim -> EExpr -> EExpr -> m EExpr
@@ -210,7 +210,7 @@ eapply newprim lhs rhs = do
         ELet x newprim [lhsval, rhsval] (EIn (ERef x))
 
 ppEVar :: EVar -> Doc ann
-ppEVar n = "@" <> pretty n
+ppEVar (EVar n) = "@" <> pretty n
 
 ppEValue :: EValue -> Doc ann
 ppEValue = \case
@@ -232,14 +232,3 @@ ppEExpr = \case
     , ppEExpr rest
     ]
   EIn val -> "IN" <+> ppEValue val
-
-----------------------------------------------------------------------
-
-cnst :: (AnfPrim :<< p) => Expr p -> Expr p
-cnst x = Fix (Prim dummyPos (inject' EConst)) ! x
-
-eadd :: (AnfPrim :<< p) => Expr p -> Expr p -> Expr p
-eadd x y = Fix (Prim dummyPos (inject' (EPrim EAdd))) ! x ! y
-
-loop :: (AnfPrim :<< p) => Expr p -> Expr p
-loop x = Fix (Prim dummyPos (inject' ELoop)) ! x

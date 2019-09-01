@@ -10,24 +10,25 @@
 {-# LANGUAGE TypeOperators              #-}
 {-# LANGUAGE UndecidableInstances       #-}
 
-module Prim.IO where
+module Prim.IO
+  ( IOPrim(..)
+  , ioEff
+  ) where
 
 import Control.Monad.IO.Class
 import Control.Effect.Carrier
-import Control.Effect.Error
 
 import Data.Functor.Const
-import Data.Functor.Foldable (Fix (..), unfix)
+import Data.Functor.Foldable (Fix (..))
 import Data.Sum
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 
 import Expr
+import Eval
 import Pretty
 import Prim.Base
-import Syntax.Position
 import Types
-import Utils
 
 data IOPrim
   = ReadLn
@@ -38,7 +39,7 @@ instance PrettyPrim (Const IOPrim) where
     Const ReadLn  -> "ReadLn"
     Const WriteLn -> "WriteLn"
 
-instance ( Member (Error String) sig
+instance ( Member RuntimeErrorEffect sig
          , Carrier sig m
          , MonadIO m
          , LambdaValue m :< v
@@ -61,9 +62,6 @@ instance ( Member (Error String) sig
               pure $ mkVUnit
             _ -> evalError "WriteLn: cannot print non-text"
 
-    where
-      projBase = project @BaseValue . unfix
-
 ioEff :: Label
 ioEff = Label (T.pack "io")
 
@@ -79,11 +77,3 @@ instance TypePrim (Const IOPrim) where
       mono $
         (Fix (T TText), Fix $ TRowExtend ioEff (Fix TPresent) (Fix (T TUnit)) e1) ~>
         (Fix (T TUnit))
-
-----------------------------------------------------------------------
-
-readln :: (IOPrim :<< p, BasePrim :<< p) => Expr p
-readln = Fix (Prim dummyPos (inject' ReadLn)) ! prim MkUnit
-
-writeln :: (IOPrim :<< p) => Expr p -> Expr p
-writeln x = Fix (Prim dummyPos (inject' WriteLn)) ! x

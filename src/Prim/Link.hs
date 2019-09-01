@@ -17,20 +17,17 @@ module Prim.Link
   ) where
 
 import Control.Effect.Carrier
-import Control.Effect.State
-import Control.Effect.Reader
-import Control.Effect.Error
 import Control.Monad.IO.Class
 
-import Data.Functor.Const
-import Data.Functor.Foldable (Fix (..), unfix)
-import Data.Sum
-import qualified Data.Map as M
 import qualified Data.ByteString.Lazy.Char8 as BL8
+import Data.Functor.Const
+import Data.Functor.Foldable (Fix (..))
+import qualified Data.Map as M
+import Data.Sum
 import qualified Data.Text as T
-
 import qualified Language.SexpGrammar
 
+import Eval
 import Expr
 import Pretty
 import Prim.Anf
@@ -47,10 +44,10 @@ instance PrettyPrim (Const LinkPrim) where
   prettyPrim = \case
     Const (Link t) -> "Link" <> ppType t
 
-instance ( Member (Error String) sig
-         , Member (State EVar) sig
-         , Member (Reader (M.Map Variable (Value v))) sig
-         , Member (Error (Value v)) sig
+instance ( Member (RuntimeErrorEffect) sig
+         , Member (EnvEffect v) sig
+         , Member (AnfEffect) sig
+         , Member (ExceptionEffect v) sig
          , Carrier sig m
          , MonadIO m
          , LambdaValue m :< v
@@ -72,14 +69,10 @@ instance ( Member (Error String) sig
                 Right (t', _e)
                   | t == t' ->
                     pure $ mkVLam @m $ \_ ->
-                      local @(M.Map Variable (Value v)) (const M.empty) (eval expr)
+                      localEnv @v (const M.empty) (eval expr)
                   | otherwise -> evalError "Link: types did not match."
 
             _ -> evalError "ReadLn: expected Unit"
-
-    where
-      projBase = project @BaseValue . unfix
-
 
 instance TypePrim (Const LinkPrim) where
   typePrim = \case

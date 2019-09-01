@@ -11,26 +11,30 @@
 {-# LANGUAGE UndecidableInstances       #-}
 
 module Prim.Exception
-  ( ExceptionPrim (..)
+  ( ExceptionEffect
+  , ExceptionEffectC
+  , runException
+  , ExceptionPrim (..)
   ) where
 
 import Control.Effect.Carrier
 import Control.Effect.Error
 
-import Data.Functor.Classes
 import Data.Functor.Const
 import Data.Functor.Foldable (Fix (..), unfix)
-import qualified Data.Map as M
 import Data.Sum
-import qualified Data.Text as T
-import Data.Text.Prettyprint.Doc as PP
 
 import Expr
+import Eval
 import Pretty
-import Syntax.Position
 import Prim.Base
 import Types
-import Utils
+
+type ExceptionEffect v = Error (Value v)
+type ExceptionEffectC v = ErrorC (Value v)
+
+runException :: ExceptionEffectC v m a -> m (Either (Value v) a)
+runException = runError
 
 data ExceptionPrim
   = RaiseExc
@@ -41,8 +45,8 @@ instance PrettyPrim (Const ExceptionPrim) where
     Const RaiseExc -> "RaiseExc"
     Const CatchExc -> "CatchExc"
 
-instance ( Member (Error String) sig
-         , Member (Error (Value v)) sig
+instance ( Member (RuntimeErrorEffect) sig
+         , Member (ExceptionEffect v) sig
          , Carrier sig m
          , LambdaValue m :< v
          , BaseValue :< v
