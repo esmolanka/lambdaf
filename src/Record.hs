@@ -4,10 +4,10 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase                 #-}
 {-# LANGUAGE MultiParamTypeClasses      #-}
+{-# LANGUAGE OverloadedStrings          #-}
 {-# LANGUAGE ScopedTypeVariables        #-}
 {-# LANGUAGE TypeApplications           #-}
 {-# LANGUAGE TypeOperators              #-}
--- :-/
 {-# LANGUAGE UndecidableInstances       #-}
 
 module Record where
@@ -21,11 +21,14 @@ import Data.Functor.Foldable (Fix (..), unfix)
 import qualified Data.Map as M
 import Data.Sum
 import qualified Data.Text as T
+import Data.Text.Prettyprint.Doc as PP
 
 import Expr
-import Utils
 import Position
+import Pretty
 import Types
+import Utils
+
 
 data RecordPrim
   = RecordNil
@@ -48,6 +51,20 @@ instance Show1 RecordValue where
               map (\(Label lbl, el) -> shows lbl . showString " = " . sp 0 el) lst
       in showString "{" . showBody (M.toList x) . showString "}"
 
+instance Pretty1 RecordValue where
+  liftPretty pp = \case
+    VRecord x ->
+      group $ braces $ align $ vsep $
+      punctuate "," $
+      map (\(lbl, v) -> ppLabel lbl <+> "=" <+> pp v) (M.toList x)
+
+instance PrettyPrim (Const RecordPrim) where
+  prettyPrim = \case
+    Const RecordNil           -> "RecordNil"
+    Const (RecordExtend lbl)  -> "RecordExtend" <> angles (ppLabel lbl)
+    Const (RecordSelect lbl)  -> "RecordSelect" <> angles (ppLabel lbl)
+    Const (RecordDefault lbl) -> "RecordDefault" <> angles (ppLabel lbl)
+
 instance ( Member (Error String) sig
          , Carrier sig m
          , LambdaValue m :< v
@@ -62,7 +79,7 @@ instance ( Member (Error String) sig
         pure $ mkVLam @m $ \r ->
           case projRecord r of
             Just (VRecord r') -> pure $ mkVRecord (M.insert lbl a r')
-            _ -> throwError "RecordExtend: not a record"
+            _ -> evalError "RecordExtend: not a record"
 
       Const (RecordSelect lbl@(Label lbl')) ->
         pure $ mkVLam @m $ \r ->
@@ -70,8 +87,8 @@ instance ( Member (Error String) sig
             Just (VRecord r') ->
               case M.lookup lbl r' of
                 Just a  -> pure a
-                Nothing -> throwError ("RecordSelect: label not found " ++ show lbl')
-            _ -> throwError "RecordSelect: not a record"
+                Nothing -> evalError ("RecordSelect: label not found " ++ show lbl')
+            _ -> evalError "RecordSelect: not a record"
 
       Const (RecordDefault lbl) ->
         pure $ mkVLam @m $ \d ->
@@ -81,7 +98,7 @@ instance ( Member (Error String) sig
               case M.lookup lbl r' of
                 Just a  -> pure a
                 Nothing -> pure d
-            _ -> throwError "RecordDefault: not a record"
+            _ -> evalError "RecordDefault: not a record"
 
     where
       projRecord = project @RecordValue . unfix

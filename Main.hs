@@ -67,13 +67,13 @@ evalExpr e = do
   res <- eval' e
   case res of
     Left err -> putStrLn err
-    Right p -> putStrLn (show p)
+    Right p -> putStrLn (render (ppValue p))
 
 typeExpr :: Expr PrimTypes -> IO ()
 typeExpr e = do
   case infer' e of
-    Left err -> putStrLn (pp (ppError err))
-    Right (ty,effty) -> putStrLn $ pp (ppType ty) ++ "\n" ++ pp (ppType effty)
+    Left err -> putStrLn (render (ppError err))
+    Right (ty,effty) -> putStrLn $ render (ppType ty) ++ "\n" ++ render (ppType effty)
 
 ----------------------------------------------------------------------
 
@@ -115,8 +115,10 @@ main = do
       Left err -> die $ "parse error:\n" ++ err
       Right s -> pure (desugar s :: Expr PrimTypes)
 
+  putStrLn $ render (ppExpr expr)
+
   case infer' expr of
-    Left tcerror -> die (pp (ppError tcerror))
+    Left tcerror -> die (render (ppError tcerror))
     Right (ty,effty) -> do
-      putStrLn $ " : " ++ pp (ppType ty) ++ "\nε: " ++ pp (ppType effty)
+      putStrLn $ " : " ++ render (ppType ty) ++ "\nε: " ++ render (ppType effty)
       evalExpr expr

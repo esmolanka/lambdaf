@@ -4,10 +4,10 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase                 #-}
 {-# LANGUAGE MultiParamTypeClasses      #-}
+{-# LANGUAGE OverloadedStrings          #-}
 {-# LANGUAGE ScopedTypeVariables        #-}
 {-# LANGUAGE TypeApplications           #-}
 {-# LANGUAGE TypeOperators              #-}
--- :-/
 {-# LANGUAGE UndecidableInstances       #-}
 
 module IO where
@@ -16,22 +16,27 @@ import Control.Monad.IO.Class
 import Control.Effect.Carrier
 import Control.Effect.Error
 
-import qualified Data.Text as T
-import qualified Data.Text.IO as T
 import Data.Functor.Const
 import Data.Functor.Foldable (Fix (..), unfix)
 import Data.Sum
+import qualified Data.Text as T
+import qualified Data.Text.IO as T
 
-import Expr
 import Base
-import Utils
+import Expr
 import Position
-
+import Pretty
 import Types
+import Utils
 
 data IOPrim
   = ReadLn
   | WriteLn
+
+instance PrettyPrim (Const IOPrim) where
+  prettyPrim = \case
+    Const ReadLn  -> "ReadLn"
+    Const WriteLn -> "WriteLn"
 
 instance ( Member (Error String) sig
          , Carrier sig m
@@ -46,7 +51,7 @@ instance ( Member (Error String) sig
             Just VUnit -> do
               ln <- liftIO T.getLine
               pure $ mkVText ln
-            _ -> throwError "ReadLn: expected Unit"
+            _ -> evalError "ReadLn: expected Unit"
 
       Const WriteLn -> do
         pure $ mkVLam @m $ \c ->
@@ -54,7 +59,7 @@ instance ( Member (Error String) sig
             Just (VText t) -> do
               liftIO $ T.putStrLn t
               pure $ mkVUnit
-            _ -> throwError "WriteLn: cannot print non-text"
+            _ -> evalError "WriteLn: cannot print non-text"
 
     where
       projBase = project @BaseValue . unfix

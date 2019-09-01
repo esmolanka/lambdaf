@@ -4,10 +4,10 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase                 #-}
 {-# LANGUAGE MultiParamTypeClasses      #-}
+{-# LANGUAGE OverloadedStrings          #-}
 {-# LANGUAGE ScopedTypeVariables        #-}
 {-# LANGUAGE TypeApplications           #-}
 {-# LANGUAGE TypeOperators              #-}
--- :-/
 {-# LANGUAGE UndecidableInstances       #-}
 
 module Base where
@@ -15,18 +15,19 @@ module Base where
 import Control.Effect.Carrier
 import Control.Effect.Error
 
-import qualified Data.Text as T
-import Data.Text (Text)
 import Data.Functor.Classes
 import Data.Functor.Const
 import Data.Functor.Foldable (Fix (..), unfix)
 import Data.Sum
+import Data.Text (Text)
+import qualified Data.Text as T
+import Data.Text.Prettyprint.Doc as PP
 
 import Expr
-import Utils
 import Position
-
+import Pretty
 import Types
+import Utils
 
 data BasePrim
   = Add
@@ -63,6 +64,24 @@ instance Show1 BaseValue where
     VPair a b -> showString "(" . sp 0 a . showString " ** " . sp 0 b . showString ")"
     VUnit     -> showString "Unit"
 
+instance Pretty1 BaseValue where
+  liftPretty pp = \case
+    VDbl x    -> pretty x
+    VText x   -> pretty (show x)
+    VPair a b -> parens (pp a <+> "**" <+> pp b)
+    VUnit     -> "Unit"
+
+instance PrettyPrim (Const BasePrim) where
+  prettyPrim = \case
+    Const Add          -> "Add"
+    Const If           -> "If"
+    Const ReadDouble   -> "ReadNum"
+    Const Delay        -> "Delay"
+    Const MkPair       -> "Pair"
+    Const (MkDouble n) -> pretty n
+    Const (MkText s)   -> pretty (show s)
+    Const MkUnit       -> "Unit"
+
 instance ( Member (Error String) sig
          , Carrier sig m
          , LambdaValue m :< v
@@ -76,8 +95,8 @@ instance ( Member (Error String) sig
             Just (VDbl x') ->
               case projBase y of
                 Just (VDbl y') -> pure $ mkVDbl (x' + y')
-                _ -> throwError "RHS is not a double!"
-            _ -> throwError "LHS is not a double!"
+                _ -> evalError "RHS is not a double!"
+            _ -> evalError "LHS is not a double!"
 
       Const ReadDouble ->
         pure $ mkVLam @m $ \x ->
@@ -85,8 +104,8 @@ instance ( Member (Error String) sig
             Just (VText x') ->
               case reads (T.unpack x') of
                 [(dbl,"")] -> pure $ mkVDbl dbl
-                _          -> throwError ("Could not read double: " ++ show x')
-            _ -> throwError "ReadDouble: not a string"
+                _          -> evalError ("Could not read double: " ++ show x')
+            _ -> evalError "ReadDouble: not a string"
 
       Const If ->
         pure $ mkVLam @m $ \c ->
@@ -96,14 +115,14 @@ instance ( Member (Error String) sig
             Just (VDbl c')
               | c' > 0    -> forceDelayed t
               | otherwise -> forceDelayed f
-            _ -> throwError "Condition is not a double!"
+            _ -> evalError "Condition is not a double!"
 
       Const Delay ->
         pure $ mkVLam @m $ \f ->
         pure $ mkVLam @m $ \u ->
           case projBase u of
             Just VUnit -> forceDelayed f
-            _ -> throwError "Delay expects a unit"
+            _ -> evalError "Delay expects a unit"
 
       Const MkPair ->
         pure $ mkVLam @m $ \a ->
@@ -122,7 +141,7 @@ instance ( Member (Error String) sig
       forceDelayed l =
         case projLam l of
           Just (VLam f) -> f mkVUnit
-          Nothing -> throwError "Cannot force a non-lambda"
+          Nothing -> evalError "Cannot force a non-lambda"
 
       projLam :: (LambdaValue m :< v) => Value v -> Maybe (LambdaValue m (Value v))
       projLam = project @(LambdaValue m) . unfix

@@ -5,10 +5,10 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase                 #-}
 {-# LANGUAGE MultiParamTypeClasses      #-}
+{-# LANGUAGE OverloadedStrings          #-}
 {-# LANGUAGE ScopedTypeVariables        #-}
 {-# LANGUAGE TypeApplications           #-}
 {-# LANGUAGE TypeOperators              #-}
--- :-/
 {-# LANGUAGE UndecidableInstances       #-}
 
 module Anf where
@@ -26,13 +26,20 @@ import Data.Functor.Foldable (Fix (..), unfix)
 import qualified Data.Map as M
 import qualified Data.Set as S
 import Data.Sum
+import Data.Text.Prettyprint.Doc as PP
 
-import Expr
 import Base (BaseValue(..))
-import Utils
+import Expr
 import Position
-
+import Pretty
 import Types
+import Utils
+
+data AnfPrim
+  = EConst
+  | EPrim EPrim
+  | ELoop
+  deriving (Show)
 
 data AnfValue e
   = VAnf EExpr
@@ -50,11 +57,19 @@ instance Show1 AnfValue where
     VAnf e -> showString "{" . shows e . showString "}"
     VStore x s r -> showString "{@" . shows x . showString " = " . shows s . showString "; " . sp 0 r . showString "}"
 
-data AnfPrim
-  = EConst
-  | EPrim EPrim
-  | ELoop
-  deriving (Show)
+instance Pretty1 AnfValue where
+  liftPretty pp = \case
+    VAnf e -> braces $ align $ ppEExpr e
+    VStore x s r -> braces $ align $ group $ nest 2 $ vsep
+      [ "STORING" <+> ppEVar x <+> ppEExpr s
+      , "IN" <+> pp r
+      ]
+
+instance PrettyPrim (Const AnfPrim) where
+  prettyPrim = \case
+    Const EConst -> "EConst"
+    Const (EPrim p) -> ppEPrim p
+    Const ELoop -> "ELoop"
 
 instance
   ( Member (Error String) sig
@@ -70,7 +85,7 @@ instance
       pure $ mkVLam @m $ \x ->
         case projBase x of
           Just (VDbl x') -> pure $ mkVAnf (EIn (ELit x'))
-          _ -> throwError "Value is not a double!"
+          _ -> evalError "Value is not a double!"
 
     Const (EPrim eprim) ->
       pure $ mkVLam @m $ \x ->
@@ -81,8 +96,8 @@ instance
               Just (VAnf y') -> do
                 anf <- eapply eprim x' y'
                 pure (mkVAnf anf)
-              _ -> throwError "RHS is not an ANF!"
-          _ -> throwError "LHS is not an ANF!"
+              _ -> evalError "RHS is not an ANF!"
+          _ -> evalError "LHS is not an ANF!"
 
     Const ELoop ->
       pure $ mkVLam @m $ \f ->
@@ -96,18 +111,18 @@ instance
                   (Just (VPair s r), _) ->
                     case projAnf s of
                       (Just (VAnf s')) -> pure (mkVStore stateVar s' r)
-                      _                -> throwError $ "Loop result is not a VStore or VPair"
-                  _               -> throwError $ "Loop result is not a VStore or VPair"
+                      _                -> evalError $ "Loop result is not a VStore or VPair"
+                  _               -> evalError $ "Loop result is not a VStore or VPair"
 
                 flatten :: Value v -> m EExpr
                 flatten v = case projAnf v of
                   Just (VStore x s r) -> eapply (EStore x) (EIntro x s) =<< flatten r
                   Just (VAnf x)       -> pure x
-                  _                   -> throwError "Can't flatten yet"
+                  _                   -> evalError "Can't flatten yet"
 
             (store res >>= flatten >>= pure . mkVAnf) `catchError` (\(_ :: String) -> store res)
 
-          _ -> throwError "Loop body is not a function!"
+          _ -> evalError "Loop body is not a function!"
     where
       projLam :: (LambdaValue m :< v) => Value v -> Maybe (LambdaValue m (Value v))
       projLam = project @(LambdaValue m) . unfix
@@ -193,6 +208,30 @@ eapply newprim lhs rhs = do
         | otherwise -> EIntro ref (go2 lhsval x (S.insert ref used) rest)
       EIn rhsval ->
         ELet x newprim [lhsval, rhsval] (EIn (ERef x))
+
+ppEVar :: EVar -> Doc ann
+ppEVar n = "@" <> pretty n
+
+ppEValue :: EValue -> Doc ann
+ppEValue = \case
+  ERef ref -> ppEVar ref
+  ELit dbl -> pretty dbl
+
+ppEPrim :: EPrim -> Doc ann
+ppEPrim = pretty . show
+
+ppEExpr :: EExpr -> Doc ann
+ppEExpr = \case
+  ELet ref prim args rest -> vsep
+    [ "LET" <+> ppEVar ref <+> "=" <+>
+        angles (ppEPrim prim) <+> list (map ppEValue args)
+    , ppEExpr rest
+    ]
+  EIntro ref rest -> vsep
+    [ "INTRO" <+> ppEVar ref
+    , ppEExpr rest
+    ]
+  EIn val -> "IN" <+> ppEValue val
 
 ----------------------------------------------------------------------
 

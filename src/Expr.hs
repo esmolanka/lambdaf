@@ -7,7 +7,6 @@
 {-# LANGUAGE LambdaCase                 #-}
 {-# LANGUAGE MonoLocalBinds             #-}
 {-# LANGUAGE MultiParamTypeClasses      #-}
-{-# LANGUAGE PolyKinds                  #-}
 {-# LANGUAGE ScopedTypeVariables        #-}
 {-# LANGUAGE TypeApplications           #-}
 {-# LANGUAGE TypeOperators              #-}
@@ -22,9 +21,10 @@ import Control.Effect.Reader
 import Data.Functor.Classes
 import Data.Functor.Const
 import Data.Functor.Foldable (Fix (..), unfix, cata)
-import qualified Data.Text as T
 import qualified Data.Map as M
 import Data.Sum
+import qualified Data.Text as T
+import Data.Text.Prettyprint.Doc as PP
 import Data.Void
 
 import Utils
@@ -52,7 +52,14 @@ mkVLam x = Fix . inject $ VLam x
 
 instance Show1 (LambdaValue m) where
   liftShowsPrec _sp _sl _n = \case
-    VLam _    -> showString "<Lambda>"
+    VLam _ -> showString "<Lambda>"
+
+instance Pretty1 (LambdaValue m) where
+  liftPretty _pp = \case
+    VLam _ -> pretty "<Lambda>"
+
+evalError :: (Member (Error String) sig, Carrier sig m) => String -> m a
+evalError = throwError
 
 class EvalPrim m v (p :: * -> *) where
   evalPrim :: p Void -> m (Value v)
@@ -65,6 +72,7 @@ eval :: forall m sig (p :: [*]) (v :: [* -> *]).
   , Member (Reader (M.Map Variable (Value v))) sig
   , Carrier sig m
   , EvalPrim m v (Sum (Map Const p))
+  , Apply Show1 v
   , LambdaValue m :< v
   ) => Expr p -> m (Value v)
 eval = cata alg
@@ -86,7 +94,7 @@ eval = cata alg
         f' <- f
         case project (unfix f') of
           Just (VLam f'') -> e >>= f''
-          _ -> throwError $ show pos ++ ": Could not apply to a non-function"
+          _ -> throwError $ show pos ++ ": Could not apply to a non-function: " ++ show (unfix f')
 
       Let _pos x e body -> do
         v <- e
