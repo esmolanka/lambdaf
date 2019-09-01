@@ -191,12 +191,13 @@ desugar = resolvePrimitives . futu coalg
 
 primitives :: (Raw.BasePrim :<< p, Raw.IOPrim :<< p, Raw.AnfPrim :<< p, Raw.LinkPrim :<< p) => proxy p -> M.Map Variable (Int, Sum' p)
 primitives _ = M.fromList
-  [ (Variable "+",       (0, inject' Raw.Add))
-  , (Variable "readnum", (0, inject' Raw.ReadDouble))
-  , (Variable "readln",  (0, inject' Raw.ReadLn))
-  , (Variable "writeln", (0, inject' Raw.WriteLn))
-  , (Variable "^",       (0, inject' Raw.EConst))
-  , (Variable "^+",      (0, inject' (Raw.EPrim Raw.EAdd)))
+  [ (Variable "+",           (0, inject' Raw.Add))
+  , (Variable "readnum",     (0, inject' Raw.ReadDouble))
+  , (Variable "shownum",     (0, inject' Raw.ShowDouble))
+  , (Variable "readln",      (0, inject' Raw.ReadLn))
+  , (Variable "writeln",     (0, inject' Raw.WriteLn))
+  , (Variable "^",           (0, inject' Raw.EConst))
+  , (Variable "^+",          (0, inject' (Raw.EPrim Raw.EAdd)))
   , (Variable "link-double", (0, inject' (Raw.Link (Fix (T (TDouble))))))
   ]
 

@@ -33,6 +33,7 @@ data BasePrim
   = Add
   | If
   | ReadDouble
+  | ShowDouble
   | Delay
   | MkPair
   | MkDouble Double
@@ -76,6 +77,7 @@ instance PrettyPrim (Const BasePrim) where
     Const Add          -> "Add"
     Const If           -> "If"
     Const ReadDouble   -> "ReadNum"
+    Const ShowDouble   -> "ShowNum"
     Const Delay        -> "Delay"
     Const MkPair       -> "Pair"
     Const (MkDouble n) -> pretty n
@@ -106,6 +108,12 @@ instance ( Member (Error String) sig
                 [(dbl,"")] -> pure $ mkVDbl dbl
                 _          -> evalError ("Could not read double: " ++ show x')
             _ -> evalError "ReadDouble: not a string"
+
+      Const ShowDouble ->
+        pure $ mkVLam @m $ \x ->
+          case projBase x of
+            Just (VDbl x') -> pure $ mkVText (T.pack (show x'))
+            _ -> evalError "ShowDouble: not a double"
 
       Const If ->
         pure $ mkVLam @m $ \c ->
@@ -165,6 +173,11 @@ instance TypePrim (Const BasePrim) where
       mono $
         (Fix (T TText), Fix (TRowExtend partialEff (Fix TPresent) (Fix (T TUnit)) e1)) ~>
         (Fix (T TDouble))
+    Const ShowDouble ->
+      effect $ \e1 ->
+      mono $
+        (Fix (T TDouble), e1) ~>
+        (Fix (T TText))
     Const If ->
       forall Star $ \a ->
       effect $ \e1 ->

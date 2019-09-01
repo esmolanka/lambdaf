@@ -19,4 +19,5 @@
   (do
       {x <- (yes-or-no)}
       {y <- (yes-or-no-2)}
-      (+ x y)))
+      (writeln "Sum of the two is:")
+      (writeln (shownum (+ x y)))))
