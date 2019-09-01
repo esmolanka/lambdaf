@@ -1,2 +1,4 @@
 (do (writeln "Enter a file name to evaluate (should return Double):")
-    (link-double (readln)))
+    {x <- (link-double (readln))}
+    (writeln "OK. Running loaded code...")
+    (x))

@@ -71,7 +71,9 @@ instance ( Member (Error String) sig
               case runInfer (inferExprType expr) of
                 Left tcerror -> evalError $ "Link:\n" ++ render (ppError tcerror)
                 Right (t', e')
-                  | t == t' -> local @(M.Map Variable (Value v)) (const M.empty) (eval expr)
+                  | t == t' ->
+                    pure $ mkVLam @m $ \_ ->
+                      local @(M.Map Variable (Value v)) (const M.empty) (eval expr)
                   | otherwise -> evalError "Link: types did not match."
 
             _ -> evalError "ReadLn: expected Unit"
@@ -84,5 +86,8 @@ instance TypePrim (Const LinkPrim) where
   typePrim = \case
     Const (Link t) ->
       effect $ \e1 ->
+      effect $ \e2 ->
       mono $
-        (Fix (T TText), Fix $ TRowExtend ioEff (Fix TPresent) (Fix (T TUnit)) e1) ~> t
+        (Fix (T TText), Fix $ TRowExtend ioEff (Fix TPresent) (Fix (T TUnit)) e1) ~>
+        (Fix (T TUnit), e2) ~>
+        t
