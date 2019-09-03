@@ -1,0 +1,34 @@
+(let
+    ([computation
+      `(do {x <- (readnum (readln))}
+           (if x 0 (raise (:NegativeInput "Should be positive!")))
+           (if (+ x -5) (raise (:TooBig "Too big!")) 0)
+           (writeln "OK"))]
+     [catch-negative
+      (lambda (k)
+        (catch
+         k
+         (lambda (x)
+           (case x
+             [:NegativeInput msg -> (do (writeln "Caught a :NegativeInput exception:") (writeln msg))]
+             [otherwise err -> (raise err)]))))]
+     [catch-too-big
+      (lambda (k)
+        (catch
+         k
+         (lambda (x)
+           (case x
+             [:TooBig msg -> (do (writeln "Caught a :TooBig exception:") (writeln msg))]
+             [otherwise err -> (raise err)]))))]
+
+     [ensure-no-exceptions
+      (lambda (k) (catch k (lambda (x) (case x))))])
+
+  (do (writeln "Will catch negative:")
+      (catch-negative computation)
+
+      (writeln "Will catch too big (>5):")
+      (catch-too-big computation)
+
+      (writeln "Will catch both exeptions:")
+      (ensure-no-exceptions `(catch-negative `(catch-too-big computation)))))

@@ -60,6 +60,7 @@ data SeqBinding e
 
 data VariantPattern e
   = VariantMatchCase Label Variable e
+  | VariantCatchAll Variable e
     deriving (Generic)
 
 type Sugared = Fix SugaredF
@@ -184,13 +185,15 @@ desugar = resolvePrimitives . futu coalg
       Fix (Case pos scrutinee alts) ->
         let primDecomp lbl = Free (Raw.Prim (dsPos pos) (inject' (Raw.VariantDecomp lbl)))
             primAbsurd = Free (Raw.Prim (dsPos pos) (inject' Raw.VariantAbsurd))
-            app f a  = Free (Raw.App (dsPos pos) f a)
-            lam v b  = Free (Raw.Lambda (dsPos pos) v b)
+            app f a = Free (Raw.App (dsPos pos) f a)
+            lam v b = Free (Raw.Lambda (dsPos pos) v b)
             decompose lbl v handle = primDecomp lbl `app` lam v handle
         in unFree $
              flip app (Pure scrutinee) $
              foldr
-               (\(VariantMatchCase lbl v e) -> app (decompose lbl v (Pure e)))
+               (\case
+                   VariantMatchCase lbl v e -> app (decompose lbl v (Pure e))
+                   VariantCatchAll v e -> \_ -> lam v (Pure e))
                primAbsurd
                alts
 
@@ -333,23 +336,35 @@ bindingGrammar = with $ \bnd ->
 
 seqStmtGrammar :: Grammar Position (Sexp :- t) (SeqBinding Sugared :- t)
 seqStmtGrammar = match
-  $ With (\ign -> sugaredGrammar >>> ign)
-  $ With (\bnd -> braceList (
-             el varGrammar >>>
-             el (sym "<-") >>>
-             el sugaredGrammar
-             ) >>> bnd)
+  $ With (\ign ->
+      sugaredGrammar >>>
+      ign)
+  $ With (\bnd ->
+      braceList (
+        el varGrammar >>>
+        el (sym "<-") >>>
+        el sugaredGrammar) >>>
+      bnd)
   $ End
 
 
 variantPatternGrammar :: Grammar Position (Sexp :- t) (VariantPattern Sugared :- t)
-variantPatternGrammar = with $ \pat ->
-  bracketList (
-    el ctorLabelGrammar >>>
-    el varGrammar >>>
-    el (sym "->") >>>
-    el sugaredGrammar) >>>
-  pat
+variantPatternGrammar = match
+  $ With (\pat ->
+      bracketList (
+        el ctorLabelGrammar >>>
+        el varGrammar >>>
+        el (sym "->") >>>
+        el sugaredGrammar) >>>
+      pat)
+  $ With (\catchall ->
+      bracketList (
+        el (sym "otherwise") >>>
+        el varGrammar >>>
+        el (sym "->") >>>
+        el sugaredGrammar) >>>
+      catchall)
+  $ End
 
 
 boolGrammar :: Grammar Position (Sexp :- t) (Bool :- t)
