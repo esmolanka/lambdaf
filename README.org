@@ -15,7 +15,7 @@ and extensible effects
 * MVP subtasks
   - [X] Refactor evaluation, typechecking, side-effecting, and
     printing to even more modularised way
-  - [ ] Add variant construction and elimination (case expressions)
+  - [X] Add variant construction and elimination (case expressions)
   - [ ] Make exceptions use variants
   - [ ] Add type classes for numbers (and lifted numbers -- embedded or
     vectorised or embedded-vectorised)

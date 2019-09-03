@@ -37,6 +37,7 @@ import Prim.Exception
 import Prim.IO
 import Prim.Link
 import Prim.Record
+import Prim.Variant
 import Syntax.Sugared (desugar, sugaredGrammar)
 import TypeChecker
 import Types
@@ -44,8 +45,8 @@ import Types
 ----------------------------------------------------------------------
 -- Concrete language
 
-type PrimTypes = '[BasePrim, RecordPrim, AnfPrim, IOPrim, LinkPrim, ExceptionPrim]
-type ValueTypes = '[LambdaValue (Eval IO), BaseValue, RecordValue, AnfValue]
+type PrimTypes = '[BasePrim, RecordPrim, VariantPrim, AnfPrim, IOPrim, LinkPrim, ExceptionPrim]
+type ValueTypes = '[LambdaValue (Eval IO), BaseValue, RecordValue, VariantValue,AnfValue]
 
 newtype Eval m a = Eval
   { unEval :: RuntimeErrorEffectC (ExceptionEffectC ValueTypes (EnvEffectC ValueTypes (AnfEffectC (LiftC m)))) a
@@ -95,7 +96,8 @@ main = do
     Left tcerror -> die (render (ppError tcerror))
     Right (ty,effty) -> do
       putStrLn $ render $ vsep
-        [ ":" <+> ppType ty
+        [ "----------------------------------------------------------------------"
+        , ":" <+> ppType ty
         , "!" <+> ppType effty
         , "----------------------------------------------------------------------"
         ]

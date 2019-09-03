@@ -20,25 +20,27 @@ import Control.Monad.Free
 import Control.Effect.Reader
 
 import Data.Coerce
+import Data.Char (isUpper)
 import Data.Functor.Foldable (Fix(..), cata, futu)
 import qualified Data.Map as M
 import Data.Proxy
-import Data.Text (Text, pack, isPrefixOf)
+import Data.Text (Text, pack, uncons)
 import GHC.Generics
 
 import Language.Sexp.Located (Position(..))
 import Language.SexpGrammar
 import Language.SexpGrammar.Generic
 
-import qualified Expr as Raw
-import qualified Prim.Base as Raw (BasePrim(..))
-import qualified Prim.Record as Raw (RecordPrim(..))
-import qualified Prim.IO as Raw (IOPrim(..))
-import qualified Prim.Anf as Raw (AnfPrim(..), EPrim(..))
-import qualified Prim.Link.Types as Raw (LinkPrim(..))
-import qualified Prim.Exception as Raw (ExceptionPrim(..))
-import qualified Syntax.Position as Raw
 import Expr (Variable(..))
+import qualified Expr as Raw
+import qualified Prim.Anf as Raw (AnfPrim(..), EPrim(..))
+import qualified Prim.Base as Raw (BasePrim(..))
+import qualified Prim.Exception as Raw (ExceptionPrim(..))
+import qualified Prim.IO as Raw (IOPrim(..))
+import qualified Prim.Link.Types as Raw (LinkPrim(..))
+import qualified Prim.Record as Raw (RecordPrim(..))
+import qualified Prim.Variant as Raw (VariantPrim(..))
+import qualified Syntax.Position as Raw
 import Types
 import Utils
 
@@ -56,20 +58,25 @@ data SeqBinding e
   | OrdinarySeqBinding Variable e
     deriving (Generic)
 
+data VariantPattern e
+  = VariantMatchCase Label Variable e
+    deriving (Generic)
+
 type Sugared = Fix SugaredF
 data SugaredF e
   = Var     Position Variable
   | Lambda  Position Variable [Variable] e
   | App     Position e e [e]
-  | Let     Position (LetBinding e) [(LetBinding e)] e
+  | Let     Position (LetBinding e) [LetBinding e] e
   | Literal Position Literal
   | If      Position e e e
   | MkTuple Position e e [e]
-  -- {- | MkList  Position [e] -}
   | MkRec   Position [(Label, e)]
   | RecProj Position Label e
   | RecDef  Position Label e e
   | RecExt  Position Label e e
+  | MkVnt   Position Label
+  | Case    Position e [VariantPattern e]
   | Delay   Position e
   | Force   Position e
   | DoBlock Position [SeqBinding e]
@@ -82,6 +89,7 @@ dsPos (Position fn l c) = Raw.Position (pack fn) l c l c
 desugar :: forall p.
   ( Raw.BasePrim :<< p
   , Raw.RecordPrim :<< p
+  , Raw.VariantPrim :<< p
   , Raw.IOPrim :<< p
   , Raw.AnfPrim :<< p
   , Raw.LinkPrim :<< p
@@ -169,6 +177,22 @@ desugar = resolvePrimitives . futu coalg
         Raw.App (dsPos pos)
           (Free (Raw.App (dsPos pos) (Free (Raw.Prim (dsPos pos) (inject' (Raw.RecordExtend label)))) (Pure payload)))
           (Pure record)
+
+      Fix (MkVnt pos lbl) ->
+        Raw.Prim (dsPos pos) (inject' (Raw.VariantInject lbl))
+
+      Fix (Case pos scrutinee alts) ->
+        let primDecomp lbl = Free (Raw.Prim (dsPos pos) (inject' (Raw.VariantDecomp lbl)))
+            primAbsurd = Free (Raw.Prim (dsPos pos) (inject' Raw.VariantAbsurd))
+            app f a  = Free (Raw.App (dsPos pos) f a)
+            lam v b  = Free (Raw.Lambda (dsPos pos) v b)
+            decompose lbl v handle = primDecomp lbl `app` lam v handle
+        in unFree $
+             flip app (Pure scrutinee) $
+             foldr
+               (\(VariantMatchCase lbl v e) -> app (decompose lbl v (Pure e)))
+               primAbsurd
+               alts
 
       Fix (Delay pos expr) ->
         Raw.App (dsPos pos)
@@ -278,11 +302,21 @@ varGrammar =
   partialOsi parseVar coerce
   where
     parseVar :: Text -> Either Mismatch Variable
-    parseVar t =
-      if t `elem` ["lambda","let","if","do","loop","=","<-","**","tt","ff"] ||
-         ":" `isPrefixOf` t
-      then Left (unexpected t)
-      else Right (Variable t)
+    parseVar t
+      | t `elem` ["lambda","let","if","case","do","loop","=","<-","**","tt","ff"] = Left (unexpected t)
+      | Just (h, _) <- uncons t, h == ':' || isUpper h = Left (unexpected t)
+      | otherwise = Right (Variable t)
+
+
+ctorLabelGrammar :: Grammar Position (Sexp :- t) (Label :- t)
+ctorLabelGrammar =
+  keyword >>>
+  partialOsi parseCtor coerce
+  where
+    parseCtor :: Text -> Either Mismatch Label
+    parseCtor t
+      | Just (h, _) <- uncons t, isUpper h = Right (Label t)
+      | otherwise = Left (unexpected t)
 
 
 labelGrammar :: Grammar Position (Sexp :- t) (Label :- t)
@@ -306,6 +340,17 @@ seqStmtGrammar = match
              el sugaredGrammar
              ) >>> bnd)
   $ End
+
+
+variantPatternGrammar :: Grammar Position (Sexp :- t) (VariantPattern Sugared :- t)
+variantPatternGrammar = with $ \pat ->
+  bracketList (
+    el ctorLabelGrammar >>>
+    el varGrammar >>>
+    el (sym "->") >>>
+    el sugaredGrammar) >>>
+  pat
+
 
 boolGrammar :: Grammar Position (Sexp :- t) (Bool :- t)
 boolGrammar = symbol >>> partialOsi
@@ -393,13 +438,6 @@ sugaredGrammar = fixG $ match
              el sugaredGrammar >>>
              rest sugaredGrammar) >>> mktuple)
 
-  -- $ With (\mklst ->
-  --            annotated "list literal" $
-  --            position >>>
-  --            swap >>>
-  --            bracketList (rest sugaredGrammar) >>>
-  --            mklst)
-
   $ With (\mkrec ->
              annotated "record literal" $
              position >>>
@@ -442,6 +480,23 @@ sugaredGrammar = fixG $ match
                el (sym "=") >>>
                el sugaredGrammar) >>>
              recext)
+
+  $ With (\mkvnt ->
+             annotated "variant constructor" $
+             position >>>
+             swap >>>
+             ctorLabelGrammar >>>
+             mkvnt)
+
+  $ With (\case_ ->
+             annotated "case expression" $
+             position >>>
+             swap >>>
+             list (
+               el (sym "case") >>>
+               el sugaredGrammar >>>
+               rest variantPatternGrammar) >>>
+             case_)
 
   $ With (\delay ->
              position >>>

@@ -1,0 +1,6 @@
+(let ([elim (lambda (foo)
+              (case foo
+                [:Foo x -> (+ x 1)]
+                [:Bar x -> (+ x 2)]))]
+      [foo (:Foo 45)])
+  {:elim-foo-bar elim :foo foo :applied (elim foo)})

@@ -36,6 +36,7 @@ import Prim.Exception
 import Prim.IO
 import Prim.Link.Types
 import Prim.Record
+import Prim.Variant
 import Syntax.Sugared
 import TypeChecker
 import Types
@@ -53,6 +54,7 @@ instance ( Member (RuntimeErrorEffect) sig
          , LambdaValue m :< v
          , BaseValue :< v
          , RecordValue :< v
+         , VariantValue :< v
          , AnfValue :< v
          ) => EvalPrim m v (Const LinkPrim) where
   evalPrim = \case
@@ -63,7 +65,7 @@ instance ( Member (RuntimeErrorEffect) sig
               src <- liftIO $ BL8.readFile (T.unpack fn)
               expr <- case Language.SexpGrammar.decodeWith sugaredGrammar (T.unpack fn) src of
                 Left err -> evalError $ "Link:\n" ++ err
-                Right sug -> pure (desugar sug :: Expr '[BasePrim, RecordPrim, AnfPrim, IOPrim, LinkPrim, ExceptionPrim])
+                Right sug -> pure (desugar sug :: Expr '[BasePrim, RecordPrim, VariantPrim, AnfPrim, IOPrim, LinkPrim, ExceptionPrim])
               case runInfer (inferExprType expr) of
                 Left tcerror -> evalError $ "Link:\n" ++ render (ppError tcerror)
                 Right (t', _e)
