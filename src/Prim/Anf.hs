@@ -50,6 +50,7 @@ data AnfPrim
   = EConst
   | EPrim EPrim
   | ELoop
+  | EReturn
   deriving (Show)
 
 data AnfValue e
@@ -68,8 +69,8 @@ projAnf = project @AnfValue . unfix
 
 instance Pretty1 AnfValue where
   liftPretty pp = \case
-    VAnf e -> braces $ align $ ppEExpr e
-    VStore x s r -> braces $ align $ group $ nest 2 $ vsep
+    VAnf e -> align $ ppEExpr e
+    VStore x s r -> align $ group $ nest 2 $ vsep
       [ "STORING" <+> ppEVar x <+> ppEExpr s
       , "IN" <+> pp r
       ]
@@ -79,6 +80,7 @@ instance PrettyPrim (Const AnfPrim) where
     Const EConst -> "EConst"
     Const (EPrim p) -> ppEPrim p
     Const ELoop -> "ELoop"
+    Const EReturn -> "EReturn"
 
 instance
   ( Member (RuntimeErrorEffect) sig
@@ -132,6 +134,9 @@ instance
             store res
           _ -> evalError "Loop body is not a function!"
 
+    Const EReturn ->
+      pure $ mkVLam @m $ \a -> pure a
+
 instance TypePrim (Const AnfPrim) where
   typePrim = \case
     Const EConst ->
@@ -150,11 +155,17 @@ instance TypePrim (Const AnfPrim) where
       error "EStore should not apprear in expressions"
 
     Const ELoop ->
-      effect $ \e1 ->
       forall EStar $ \a ->
       forall Star $ \b ->
+      effect $ \e1 ->
       mono $
-        ( (Fix (TExpr a), e1) ~> Fix (TPair (Fix (TExpr a)) b), e1) ~> b
+        ((Fix (TExpr a), e1) ~> Fix (TPair (Fix (TExpr a)) b), e1) ~> b
+
+    Const EReturn ->
+      forall EStar $ \a ->
+      effect $ \e1 ->
+      mono $
+        (Fix (TExpr a), e1) ~> Fix (TExpr a)
 
 ----------------------------------------------------------------------
 -- ANF

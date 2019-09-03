@@ -1,0 +1,8 @@
+{ :shared
+  (let ([delay (loop (x) (** (^+ x (^ 1)) x))])
+    (^+ delay delay))
+
+  :duplicated
+  (let ([delay `(loop (x) (** (^+ x (^ 1)) x))])
+    (^+ (delay) (delay)))
+}

@@ -199,10 +199,13 @@ desugar = resolvePrimitives . futu coalg
 
       Fix (Loop pos x xs body) ->
         let primLoop = Free (Raw.Prim (dsPos pos) (inject' Raw.ELoop))
-            app f a = Free (Raw.App (dsPos pos) f a)
+            primRet  = Free (Raw.Prim (dsPos pos) (inject' Raw.EReturn))
+            app f a  = Free (Raw.App (dsPos pos) f a)
+            lam v b  = Free (Raw.Lambda (dsPos pos) v b)
         in unFree $
+             app primRet $
              foldr
-               (\b' rest_ -> primLoop `app` (Free $ Raw.Lambda (dsPos pos) b' rest_))
+               (\bnd rest_ -> primLoop `app` lam bnd rest_)
                (Pure body)
                (reverse (x : xs))
 
