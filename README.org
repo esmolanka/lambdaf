@@ -1,24 +1,29 @@
-
 Experiments with modular lambda calculus using datatypes à la carte
 and extensible effects
 
 * Parts
   - ~Expr.hs~ -- bare lambda calculus (var, lam, app)
   - ~Prim/Base.hs~ -- base primitives and values (unit, pair, double)
-  - ~Prim/Anf.hs~  -- primitives and values for ANF expressions of a residual program of a two-level language
+  - ~Prim/Anf.hs~ -- primitives and values for ANF expressions of a
+    residual program of a two-level language
   - ~Prim/Record.hs~ -- support of records (create, extend, select)
   - ~Prim/IO.hs~ -- support of IO (read line from stdin, write line to stdout)
   - ~Prim/Exception.hs~ -- support of exceptions (raise, catch)
-  - ~Prim/Link.hs~ -- support of dynamically loading of expressions from other files
+  - ~Prim/Link.hs~ -- support of dynamically loading of expressions
+    from other files
 
 * MVP subtasks
-  - [ ] Refactor evaluation, typechecking, side-effecting, and
+  - [X] Refactor evaluation, typechecking, side-effecting, and
     printing to even more modularised way
-  - [ ] Type classes for numbers (and lifted numbers -- embedded or
+  - [ ] Add variant construction and elimination (case expressions)
+  - [ ] Make exceptions use variants
+  - [ ] Add type classes for numbers (and lifted numbers -- embedded or
     vectorised or embedded-vectorised)
+  - [ ] Add μ-types and paramorphisms for elimination
+  - [ ] Add lists and on-the-fly μ-type/paramorphims machinery for
+    elimination
+  - [ ] Pattern and pattern-matching
   - [ ] Use subsumption checking and coercion for dynamically loaded
     expressions
-  - [ ] Add variants and case expressions
-  - [ ] Add lists and list paramorphisms for elimination
   - [ ] Add vectors and vector sublanguage (and the Nat kind?)
-  - [ ] Make exceptions use variants
+  - [ ] Move towards System Fω
