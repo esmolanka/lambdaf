@@ -82,6 +82,7 @@ data SugaredF e
   | Force   Position e
   | DoBlock Position [SeqBinding e]
   | Loop    Position Variable [Variable] e
+  | Catch   Position e [VariantPattern e]
     deriving (Generic)
 
 dsPos :: Position -> Raw.Position
@@ -236,6 +237,23 @@ desugar = resolvePrimitives . futu coalg
                (Pure body)
                (reverse (x : xs))
 
+      Fix (Catch pos cont handlers) ->
+        let primDecomp lbl = Free (Raw.Prim (dsPos pos) (inject' (Raw.VariantDecomp lbl)))
+            primCatch = Free (Raw.Prim (dsPos pos) (inject' Raw.CatchExc))
+            primRaise = Free (Raw.Prim (dsPos pos) (inject' Raw.RaiseExc))
+            app f a = Free (Raw.App (dsPos pos) f a)
+            lam v b = Free (Raw.Lambda (dsPos pos) v b)
+            decompose lbl v handle = primDecomp lbl `app` lam v handle
+        in unFree $
+             app (app primCatch (Pure cont)) $
+             foldr
+               (\case
+                   VariantMatchCase lbl v e -> app (decompose lbl v (Pure e))
+                   VariantCatchAll v e -> \_ -> lam v (Pure e))
+               primRaise
+               handlers
+
+
 primitives :: forall p proxy.
   ( Raw.BasePrim :<< p
   , Raw.IOPrim :<< p
@@ -253,7 +271,6 @@ primitives _ = M.fromList
   , (Variable "^+",          (0, inject' (Raw.EPrim Raw.EAdd)))
   , (Variable "link-double", (0, inject' (Raw.Link (Fix (T (TDouble))))))
   , (Variable "raise",       (0, inject' Raw.RaiseExc))
-  , (Variable "catch",       (0, inject' Raw.CatchExc))
   ]
 
 resolvePrimitives ::
@@ -306,7 +323,7 @@ varGrammar =
   where
     parseVar :: Text -> Either Mismatch Variable
     parseVar t
-      | t `elem` ["lambda","let","if","case","do","loop","=","<-","**","tt","ff"] = Left (unexpected t)
+      | t `elem` ["lambda","let","if","case","catch","do","loop","=","<-","**","tt","ff"] = Left (unexpected t)
       | Just (h, _) <- uncons t, h == ':' || isUpper h = Left (unexpected t)
       | otherwise = Right (Variable t)
 
@@ -546,6 +563,16 @@ sugaredGrammar = fixG $ match
                      rest varGrammar)) >>>
                el sugaredGrammar) >>>
              loop)
+
+    $ With (\catch_ ->
+             annotated "catch expression" $
+             position >>>
+             swap >>>
+             list (
+               el (sym "catch") >>>
+               el sugaredGrammar >>>
+               rest variantPatternGrammar) >>>
+             catch_)
 
   $ End
 
