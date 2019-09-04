@@ -1,29 +1,28 @@
-Experiments with modular lambda calculus using datatypes à la carte
-and extensible effects
+Experiments with modular lambda calculus interpreter using datatypes à la carte
+and extensible effects.
 
 * Parts
   - ~Expr.hs~ -- bare lambda calculus (var, lam, app)
   - ~Prim/Base.hs~ -- base primitives and values (unit, pair, double)
-  - ~Prim/Anf.hs~ -- primitives and values for ANF expressions of a
-    residual program of a two-level language
+  - ~Prim/Anf.hs~ -- primitives and values for ANF expressions of a residual
+    program of a two-level language
   - ~Prim/Record.hs~ -- support of records (create, extend, select)
   - ~Prim/IO.hs~ -- support of IO (read line from stdin, write line to stdout)
   - ~Prim/Exception.hs~ -- support of exceptions (raise, catch)
-  - ~Prim/Link.hs~ -- support of dynamically loading of expressions
-    from other files
+  - ~Prim/Link.hs~ -- support of dynamic loading of expressions from other
+    files, typechecking them and running in the same runtime context as the
+    parent program runs
 
-* MVP subtasks
-  - [X] Refactor evaluation, typechecking, side-effecting, and
-    printing to even more modularised way
+* Checklist
+  - [X] Refactor evaluation, typechecking, side-effecting, and pretty-printing
+    aspects of sublanguages to make them even more modularised
   - [X] Add variant construction and elimination (case expressions)
   - [X] Make exceptions use variants
-  - [ ] Add type classes for numbers (and lifted numbers -- embedded or
-    vectorised or embedded-vectorised)
-  - [ ] Add μ-types and paramorphisms for elimination
-  - [ ] Add lists and on-the-fly μ-type/paramorphims machinery for
-    elimination
-  - [ ] Pattern and pattern-matching
-  - [ ] Use subsumption checking and coercion for dynamically loaded
-    expressions
-  - [ ] Add vectors and vector sublanguage (and the Nat kind?)
-  - [ ] Move towards System Fω
+  - [ ] Type system with higher-rank polymorphism and bidirectional type-checker
+  - [ ] Add μ-types and paramorphisms (== primitive recursion) for elimination
+  - [ ] Add type variable constraints; needed for overloaded literals and
+    operations on numbers
+  - [ ] Add lists and on-the-fly μ-type/paramorphisms machinery for elimination
+  - [ ] Use subsumption checking and coercion for dynamically loaded expressions
+  - [ ] Add vector type and vector sublanguage (and the Nat kind?)
+  - [ ] Patterns and pattern-matching
