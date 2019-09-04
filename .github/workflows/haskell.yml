@@ -11,8 +11,9 @@ jobs:
     - uses: actions/checkout@v1
     - name: Install dependencies
       run: |
+        cabal --version
         cabal update
-        cabal new-install --only-dependencies --enable-tests
+        cabal v2-install --only-dependencies --enable-tests
     - name: Build
       run: |
         cabal new-configure --enable-tests
