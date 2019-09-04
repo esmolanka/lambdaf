@@ -12,10 +12,10 @@ jobs:
     - name: Install dependencies
       run: |
         cabal update
-        cabal install --only-dependencies --enable-tests
+        cabal new-install --only-dependencies --enable-tests
     - name: Build
       run: |
-        cabal configure --enable-tests
-        cabal build
+        cabal new-configure --enable-tests
+        cabal new-build
     - name: Run tests
       run: cabal test
