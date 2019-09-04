@@ -1,26 +1,26 @@
 (let
     ([computation
       `(do {x <- (readnum (readln))}
-           (if x 0 (raise (:NegativeInput "Should be positive!")))
-           (if (+ x -9000) (raise (:TooBig "Over 9000!")) 0)
+           (if x 0 (raise (NegativeInput "Should be positive!")))
+           (if (+ x -9000) (raise (TooBig "Over 9000!")) 0)
            (writeln "OK"))]
 
      [catch-negative
       (lambda (k)
         (catch k
-           [:NegativeInput msg ->
-              (do (writeln "Caught a :NegativeInput exception:")
+           [(NegativeInput msg)
+              (do (writeln "Caught a NegativeInput exception:")
                   (writeln msg))]))]
 
      [catch-too-big
       (lambda (k)
         (catch k
-           [:TooBig msg ->
-              (do (writeln "Caught a :TooBig exception:")
+           [(TooBig msg)
+              (do (writeln "Caught a TooBig exception:")
                   (writeln msg))]))]
 
      [ensure-no-exceptions
-      (lambda (k) (catch k [otherwise x -> (case x)]))])
+      (lambda (k) (catch k [x (case x)]))])
 
   (do (writeln "Will catch negative:")
       (catch-negative computation)

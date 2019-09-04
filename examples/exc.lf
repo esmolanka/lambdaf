@@ -1,6 +1,6 @@
 (catch `(do {x <- (readnum (readln))}
-            (if x 0 (raise {:reason 42}))
+            (if x 0 (raise (WrongNumber {:reason 42})))
             (writeln "OK"))
-       (lambda (x)
-         (do (writeln "Caught an expcetion with reason:")
-             (writeln (shownum (:reason x))))))
+       [(WrongNumber x)
+        (do (writeln "Caught an expcetion with reason:")
+            (writeln (shownum (:reason x))))])

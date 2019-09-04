@@ -58,7 +58,7 @@ data SeqBinding e
   | OrdinarySeqBinding Variable e
     deriving (Generic)
 
-data VariantPattern e
+data VariantMatchLeg e
   = VariantMatchCase Label Variable e
   | VariantCatchAll Variable e
     deriving (Generic)
@@ -77,12 +77,12 @@ data SugaredF e
   | RecDef  Position Label e e
   | RecExt  Position Label e e
   | MkVnt   Position Label
-  | Case    Position e [VariantPattern e]
+  | Case    Position e [VariantMatchLeg e]
   | Delay   Position e
   | Force   Position e
   | DoBlock Position [SeqBinding e]
   | Loop    Position Variable [Variable] e
-  | Catch   Position e [VariantPattern e]
+  | Catch   Position e [VariantMatchLeg e]
     deriving (Generic)
 
 dsPos :: Position -> Raw.Position
@@ -330,7 +330,7 @@ varGrammar =
 
 ctorLabelGrammar :: Grammar Position (Sexp :- t) (Label :- t)
 ctorLabelGrammar =
-  keyword >>>
+  symbol >>>
   partialOsi parseCtor coerce
   where
     parseCtor :: Text -> Either Mismatch Label
@@ -365,20 +365,18 @@ seqStmtGrammar = match
   $ End
 
 
-variantPatternGrammar :: Grammar Position (Sexp :- t) (VariantPattern Sugared :- t)
-variantPatternGrammar = match
+variantMatchLegGrammar :: Grammar Position (Sexp :- t) (VariantMatchLeg Sugared :- t)
+variantMatchLegGrammar = match
   $ With (\pat ->
       bracketList (
-        el ctorLabelGrammar >>>
-        el varGrammar >>>
-        el (sym "->") >>>
+        el (list (
+              el ctorLabelGrammar >>>
+              el varGrammar)) >>>
         el sugaredGrammar) >>>
       pat)
   $ With (\catchall ->
       bracketList (
-        el (sym "otherwise") >>>
         el varGrammar >>>
-        el (sym "->") >>>
         el sugaredGrammar) >>>
       catchall)
   $ End
@@ -527,7 +525,7 @@ sugaredGrammar = fixG $ match
              list (
                el (sym "case") >>>
                el sugaredGrammar >>>
-               rest variantPatternGrammar) >>>
+               rest variantMatchLegGrammar) >>>
              case_)
 
   $ With (\delay ->
@@ -571,7 +569,7 @@ sugaredGrammar = fixG $ match
              list (
                el (sym "catch") >>>
                el sugaredGrammar >>>
-               rest variantPatternGrammar) >>>
+               rest variantMatchLegGrammar) >>>
              catch_)
 
   $ End
