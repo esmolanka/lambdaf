@@ -1,31 +1,28 @@
 {-# LANGUAGE DataKinds                  #-}
-{-# LANGUAGE FlexibleContexts           #-}
 {-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE LambdaCase                 #-}
 {-# LANGUAGE MultiParamTypeClasses      #-}
 {-# LANGUAGE OverloadedStrings          #-}
-{-# LANGUAGE ScopedTypeVariables        #-}
-{-# LANGUAGE TypeApplications           #-}
+{-# LANGUAGE RecordWildCards            #-}
 {-# LANGUAGE TypeOperators              #-}
-{-# LANGUAGE UndecidableInstances       #-}
 
 module Main (main) where
 
-import Prelude hiding ((**))
-
-import System.Environment
+import qualified System.IO as IO
 import System.Exit
 
 import Control.Effect
 import Control.Effect.Carrier
 import Control.Effect.Error
 import Control.Effect.Reader
+import Control.Monad (unless)
 import Control.Monad.IO.Class
 
 import qualified Data.ByteString.Lazy.Char8 as B8
 import Data.Text.Prettyprint.Doc
 import qualified Language.SexpGrammar
+
+import qualified Options.Applicative as Opt
 
 import Errors
 import Eval
@@ -77,31 +74,56 @@ infer' a = runInfer (inferExprType a)
 
 ----------------------------------------------------------------------
 
+data Options = Options
+  { optTypecheck :: Bool
+  , optFilename  :: Maybe FilePath
+  }
+
+parseOptions :: Opt.Parser Options
+parseOptions =
+  Options
+    <$> (Opt.switch $
+           Opt.long "check" <>
+           Opt.help "Typecheck only")
+    <*> (Opt.optional $ Opt.strArgument $
+           Opt.metavar "SRC" <>
+          Opt.help "Source .lf file to process (run or typecheck)")
+
 main :: IO ()
 main = do
-  args <- getArgs
+  IO.hSetEncoding IO.stdin  IO.utf8
+  IO.hSetEncoding IO.stdout IO.utf8
+  IO.hSetEncoding IO.stderr IO.utf8
+
+  Options{..} <- Opt.execParser $
+    Opt.info
+      (Opt.helper <*> parseOptions)
+      (Opt.fullDesc <>
+       Opt.progDesc "Lambda F interpreter")
+
   (fn, str) <-
-    case args of
-      []   -> (,) <$> pure "<stdin>" <*> B8.getContents
-      [fn] -> (,) <$> pure fn <*> B8.readFile fn
-      _    -> die "USAGE: lf [file]"
+    case optFilename of
+      Nothing -> (,) <$> pure "<stdin>" <*> B8.getContents
+      Just fn -> (,) <$> pure fn <*> B8.readFile fn
+
   expr <-
     case Language.SexpGrammar.decodeWith sugaredGrammar fn str of
       Left err -> die $ "parse error:\n" ++ err
       Right s -> pure (desugar s :: Expr PrimTypes)
 
-  putStrLn $ render (ppExpr expr)
+  unless optTypecheck $ putStrLn $ render (ppExpr expr)
 
   case infer' expr of
     Left tcerror -> die (render (ppError tcerror))
     Right (ty,effty) -> do
-      putStrLn $ render $ vsep
+      unless optTypecheck $ putStrLn $ render $ vsep
         [ "----------------------------------------------------------------------"
         , ":" <+> ppType ty
         , "!" <+> ppType effty
         , "----------------------------------------------------------------------"
         ]
-      res <- eval' expr
-      case res of
-        Left err -> putStrLn err
-        Right p -> putStrLn (render (ppValue p))
+      unless optTypecheck $ do
+        res <- eval' expr
+        case res of
+          Left err -> putStrLn err
+          Right p -> putStrLn (render (ppValue p))

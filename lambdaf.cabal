@@ -39,8 +39,10 @@ library
     base >= 4.7 && < 5, prettyprinter, containers, transformers-compat,
     text, recursion-schemes, fastsum, fused-effects, sexp-grammar, free,
     bytestring
-  default-language:    Haskell2010
+    -- For dante-mode in emacs
+    , optparse-applicative
 
+  default-language:    Haskell2010
 
 executable lf
   main-is:             Main.hs
@@ -49,4 +51,4 @@ executable lf
   build-depends:
     lambdaf, base >= 4.7 && < 5, bytestring, prettyprinter, containers,
     transformers-compat, text, recursion-schemes, fastsum, fused-effects,
-    sexp-grammar 
+    sexp-grammar, optparse-applicative
