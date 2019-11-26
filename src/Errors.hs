@@ -1,6 +1,7 @@
 module Errors where
 
 import Types
+import Expr
 import Syntax.Position
 
 data TCError = TCError Position Reason
@@ -13,5 +14,7 @@ data Reason
   | RecursiveRowType Type
   | KindMismatch Kind Kind
   | IllKindedType (TypeF Kind)
-  | VariableNotFound String -- TODO: replace to variable
+  | VariableNotFound Variable
+  | TypeVariableNotFound TVar
+  | OtherError String
   deriving (Show)

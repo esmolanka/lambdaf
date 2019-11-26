@@ -7,7 +7,10 @@
 {-# LANGUAGE TypeFamilies               #-}
 {-# LANGUAGE UndecidableInstances       #-}
 
-module Utils where
+module Utils
+  ( module Utils
+  , Const(..)
+  ) where
 
 import Data.Functor.Const
 import Data.Sum

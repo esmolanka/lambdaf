@@ -309,6 +309,10 @@ resolvePrimitives expr = run . runReader (primitives (Proxy @p)) $ (cata alg exp
         a' <- local @r (M.adjust (first succ) var) a
         return (Fix (Raw.Let pos var b' a'))
 
+      Raw.Annot pos e t -> do
+        e' <- e
+        return (Fix (Raw.Annot pos e' t))
+
       Raw.Prim pos c ->
         return (Fix (Raw.Prim pos c))
 

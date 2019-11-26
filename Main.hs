@@ -36,8 +36,8 @@ import Prim.Link
 import Prim.Record
 import Prim.Variant
 import Syntax.Sugared (desugar, sugaredGrammar)
-import TypeChecker
-import Types
+import TypeChecker (runInfer, inferExprType)
+import Types (Type)
 
 ----------------------------------------------------------------------
 -- Concrete language

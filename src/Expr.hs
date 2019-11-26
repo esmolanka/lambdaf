@@ -28,6 +28,7 @@ import Data.Text.Prettyprint.Doc as PP
 
 import Syntax.Position
 import Utils
+import Types
 
 newtype Variable = Variable T.Text
   deriving (Eq, Ord, Show)
@@ -40,6 +41,7 @@ data ExprF (p :: [*]) e
   | Lambda Position Variable e
   | App    Position e e
   | Let    Position Variable e e
+  | Annot  Position e Type
   | Prim   Position (Sum' p)
     deriving (Functor)
 

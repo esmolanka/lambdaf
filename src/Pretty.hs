@@ -30,13 +30,28 @@ import Utils
 ppLabel :: Label -> Doc ann
 ppLabel (Label s) = pretty s
 
-ppTyVar :: TyVar -> Doc ann
-ppTyVar (TyVar n k) = ppKind k <> pretty n
+ppKind :: Kind -> Doc ann
+ppKind Star     = "⋆"
+ppKind Row      = "ROW"
+ppKind Presence = "PRE"
+ppKind EStar    = "⋆̂"
+
+
+ppTyVar :: TVar -> Doc ann
+ppTyVar (TVar n k) = ppPrefix k <> pretty n
   where
-    ppKind Star     = "α"
-    ppKind Row      = "ρ"
-    ppKind Presence = "ω"
-    ppKind EStar    = "β"
+    ppPrefix Star     = "α"
+    ppPrefix Row      = "ρ"
+    ppPrefix Presence = "ω"
+    ppPrefix EStar    = "β"
+
+ppMetaVar :: MetaVar -> Doc ann
+ppMetaVar (MetaVar n k) = ppPrefix k <> pretty n
+  where
+    ppPrefix Star     = "α̂"
+    ppPrefix Row      = "ρ̂"
+    ppPrefix Presence = "ω̂"
+    ppPrefix EStar    = "β̂"
 
 ppBaseType :: BaseType -> Doc ann
 ppBaseType = fromString . drop 1 . show
@@ -48,12 +63,16 @@ ppType :: Type -> Doc ann
 ppType = (group .) . para $ \case
   T c -> ppBaseType c
   TE c -> ppAnfType c
+  TCtor name -> pretty name
+  TApp (_,a) (_,b) -> a <+> b
   TExpr (_, t) -> "Expr" <+> t
-  TVar tv -> ppTyVar tv
-  TArrow (f',f) (_,e) (_,a) ->
+  TRef tv -> ppTyVar tv
+  TMeta tv -> ppMetaVar tv
+  TForall tv (_,e) -> parens ("∀" <+> ppTyVar tv <> "." <+> e)
+  TArrow (f',f) (_,a) ->
     case f' of
-      Fix (TArrow{}) -> parens f <+> "-⟨" <> group e <> "⟩->" <+> a
-      _other         -> f <+>  "-⟨" <> group e <> "⟩->" <+> a
+      Fix (TArrow{}) -> parens f <+> "→" <+> a
+      _other         -> f <+>  "→" <+> a
 
   TPair (_,a) (_,b) -> parens (a <+> "**" <+> b)
   TRecord (_,row)   -> group $ braces $ space <> align (row <> space)
@@ -74,7 +93,7 @@ ppType = (group .) . para $ \case
 
     in case t' of
          Fix (TRowEmpty) -> field
-         Fix (TVar{})    -> field <+> "|" <+> t
+         Fix (TRef{})    -> field <+> "|" <+> t
          Fix _           -> vsep [ field <> ",", t ]
 
 ppError :: TCError -> Doc ann
@@ -108,6 +127,8 @@ ppReason = \case
     ]
   IllKindedType _ -> "Ill-kinded type"
   VariableNotFound expr -> "Variable not found:" <+> pretty (show expr)
+  TypeVariableNotFound tyvar -> "Type variable not found:" <+> ppTyVar tyvar
+  OtherError msg -> pretty msg
 
 ----------------------------------------------------------------------
 -- Expr
@@ -154,6 +175,9 @@ ppExpr = run . runReader @Int 0 . para alg
           [ "let" <+> ppVariable x <+> "=" <+> nest 6 (group e')
           , "in" <+> align b'
           ]
+      Annot _ (_, b) t -> do
+        b' <- local @Int (const 0) b
+        pure $ parens (b' <+> ":" <+> ppType t)
       Prim _ p ->
         pure $ prettyPrim p
 

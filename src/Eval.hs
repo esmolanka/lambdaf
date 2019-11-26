@@ -99,6 +99,9 @@ eval = cata alg
           Just (VLam f'') -> e >>= f''
           _ -> evalError $ show pos ++ ": Could not apply to a non-function"
 
+      Annot _pos body _ ->
+        body
+
       Let _pos x e body -> do
         v <- e
         localEnv (M.insert x v) body
