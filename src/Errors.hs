@@ -13,6 +13,7 @@ data Reason
   | InfiniteType Type
   | RecursiveRowType Type
   | KindMismatch Kind Kind
+  | ImpredicativePolymoprhism Type
   | IllKindedType (TypeF Kind)
   | VariableNotFound Variable
   | TypeVariableNotFound TVar

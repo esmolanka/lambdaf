@@ -128,6 +128,7 @@ ppReason = \case
   IllKindedType _ -> "Ill-kinded type"
   VariableNotFound expr -> "Variable not found:" <+> pretty (show expr)
   TypeVariableNotFound tyvar -> "Type variable not found:" <+> ppTyVar tyvar
+  ImpredicativePolymoprhism t -> "Impredicative polymorphism unsupported:" <+> ppType t
   OtherError msg -> pretty msg
 
 ----------------------------------------------------------------------

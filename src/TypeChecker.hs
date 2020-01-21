@@ -28,7 +28,7 @@ import Data.Foldable (toList, fold)
 import Data.Functor.Foldable (Fix (..), cata)
 import Data.Maybe
 import Data.Monoid (All(..), Any(..))
-import Data.Sequence (Seq)
+import Data.Sequence (Seq(..))
 import qualified Data.Sequence as Seq
 import Data.Sum
 import Data.Text.Prettyprint.Doc as PP
@@ -80,14 +80,14 @@ ppCtx (Ctx elems) = indent 2 . vsep . map ppMember . toList $ elems
       CtxMarker ev    -> "marker" <+> "▸" <> ppMetaVar ev
 
 (▸) :: Ctx -> CtxMember -> Ctx
-(Ctx ctx) ▸ mem = Ctx (ctx Seq.|> mem)
+(Ctx ctx) ▸ mem = Ctx (ctx :|> mem)
 
 ctxHole :: CtxMember -> Ctx -> Maybe (Ctx, Ctx)
 ctxHole mem (Ctx ctx) =
   let (front, rear) = Seq.breakr (== mem) ctx
   in case rear of
-       Seq.Empty -> Nothing
-       rear' Seq.:|> _ -> Just (Ctx rear', Ctx front)
+       Empty -> Nothing
+       rear' :|> _ -> Just (Ctx rear', Ctx front)
 
 ctxHoles :: CtxMember -> CtxMember -> Ctx -> Maybe (Ctx, Ctx, Ctx)
 ctxHoles x y ctx = do
@@ -99,18 +99,18 @@ ctxAssump :: Ctx -> Variable -> Maybe Type
 ctxAssump (Ctx ctx) x = go ctx
   where
     go = \case
-      Seq.Empty -> Nothing
-      _    Seq.:|> CtxAssump y t | x == y -> Just t
-      rest Seq.:|> _ -> go rest
+      Empty -> Nothing
+      _    :|> CtxAssump y t | x == y -> Just t
+      rest :|> _ -> go rest
 
 ctxSolution :: Ctx -> MetaVar -> Maybe Type
 ctxSolution (Ctx ctx) x = go ctx
   where
     go = \case
-      Seq.Empty -> Nothing
-      _    Seq.:|> CtxSolved y t | x == y -> Just t
-      _    Seq.:|> CtxMeta   y   | x == y -> Nothing
-      rest Seq.:|> _ -> go rest
+      Empty -> Nothing
+      _    :|> CtxSolved y t | x == y -> Just t
+      _    :|> CtxMeta   y   | x == y -> Nothing
+      rest :|> _ -> go rest
 
 ctxHasSkolem :: Ctx -> TVar -> Bool
 ctxHasSkolem (Ctx ctx) v =
@@ -120,10 +120,10 @@ ctxHasMeta :: Ctx -> MetaVar -> Bool
 ctxHasMeta (Ctx ctx) x = go ctx
   where
     go = \case
-      Seq.Empty -> False
-      _    Seq.:|> CtxSolved y _ | x == y -> True
-      _    Seq.:|> CtxMeta   y   | x == y -> True
-      rest Seq.:|> _ -> go rest
+      Empty -> False
+      _    :|> CtxSolved y _ | x == y -> True
+      _    :|> CtxMeta   y   | x == y -> True
+      rest :|> _ -> go rest
 
 ctxDrop :: CtxMember -> Ctx -> Ctx
 ctxDrop m (Ctx ctx) =
@@ -141,8 +141,8 @@ ctxUnsolved (Ctx ctx) =
 
 ----------------------------------------------------------------------
 
-wellformed :: Ctx -> Type -> Either Reason ()
-wellformed ctx0 ty = run $ runReader ctx0 $ runError (cata alg ty)
+(⊢) :: Ctx -> Type -> Either Reason ()
+(⊢) ctx0 ty = run $ runReader ctx0 $ runError (cata alg ty)
   where
     alg :: (Member (Error Reason) sig, Member (Reader Ctx) sig, Carrier sig m) =>
            TypeF (m ()) -> m ()
@@ -158,12 +158,6 @@ wellformed ctx0 ty = run $ runReader ctx0 $ runError (cata alg ty)
         TForall v b ->
           local (▸ CtxVar v) b
         other -> sequence_ other
-
-(⊢) :: Ctx -> Type -> Bool
-(⊢) ctx ty =
-  case wellformed ctx ty of
-    Left _  -> False
-    Right _ -> True
 
 freeMetaIn :: MetaVar -> Type -> Bool
 freeMetaIn x = getAny . cata alg
@@ -227,17 +221,6 @@ freshMeta k = do
       typeA ≤· typeB
   where
     (≤·) :: (TypeChecking sig, Carrier sig m) => TypeF Type -> TypeF Type -> m ()
-    TRef a   ≤· TRef b  | a == b = return ()
-    TMeta a  ≤· TMeta b | a == b = return ()
-    TCtor a  ≤· TCtor b | a == b = return ()
-
-    TApp f a ≤· TApp g b = do
-      f ≤ g
-      getCtx >>= \ctx -> applySolutions ctx a ≤ applySolutions ctx b
-
-    TArrow a b ≤· TArrow a' b' = do
-      a' ≤ a -- contravariant
-      getCtx >>= \ctx -> applySolutions ctx b ≤ applySolutions ctx b'
 
     TForall v a ≤· b | not (isForall (Fix b)) = do
       ma <- freshMeta (tvKind v)
@@ -250,6 +233,21 @@ freshMeta k = do
       modifyCtx (▸ CtxVar v)
       Fix a ≤ b
       modifyCtx (ctxDrop (CtxVar v))
+
+    TRef a   ≤· TRef b  | a == b = return ()
+    TMeta a  ≤· TMeta b | a == b = return ()
+    TCtor a  ≤· TCtor b | a == b = return ()
+
+    TApp f a ≤· TApp g b = do
+      case filter isMono [f, g, a, b] of
+        (t : _) -> throwError $ TCError dummyPos $ ImpredicativePolymoprhism t
+        []      -> pure ()
+      f ≤ g
+      getCtx >>= \ctx -> applySolutions ctx a ≤ applySolutions ctx b
+
+    TArrow a b ≤· TArrow a' b' = do
+      a' ≤ a -- contravariant
+      getCtx >>= \ctx -> applySolutions ctx b ≤ applySolutions ctx b'
 
     TMeta ma ≤· a | not (ma `freeMetaIn` Fix a) = instantiate Rigid ma (Fix a)
     a ≤· TMeta ma | not (ma `freeMetaIn` Fix a) = instantiate Flex  ma (Fix a)
@@ -325,7 +323,7 @@ instantiate :: (TypeChecking sig, Carrier sig m) => Direction -> MetaVar -> Type
 instantiate dir ma t = getCtx >>= go
   where
   -- Inst*Solve
-  go ctx | True <- isMono t, Just (l, r) <- ctxHole (CtxMeta ma) ctx, l ⊢ t =
+  go ctx | True <- isMono t, Just (l, r) <- ctxHole (CtxMeta ma) ctx, Right{} <- l ⊢ t =
     putCtx $ l ▸ CtxSolved ma t <> r
 
   -- Inst*Reach
@@ -403,7 +401,7 @@ infer (Fix (Ref _ x)) = do
 
 infer (Fix (Annot _ e t)) = do
   ctx <- getCtx
-  case wellformed ctx t of
+  case ctx ⊢ t of
     Left reason -> throwError $ TCError dummyPos $ reason
     Right ()    -> check e t >> return t
 
