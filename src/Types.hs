@@ -80,6 +80,7 @@ data TypeF e
   | TApp    e e
   | TArrow  e e            -- STAR -> ROW -> STAR -> STAR
   | TForall TVar e         -- κ
+  | TExists TVar e         -- κ
 
   | T BaseType             -- STAR
   | TPair e e              -- STAR -> STAR

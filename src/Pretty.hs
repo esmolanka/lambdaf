@@ -69,6 +69,7 @@ ppType = (group .) . para $ \case
   TRef tv -> ppTyVar tv
   TMeta tv -> ppMetaVar tv
   TForall tv (_,e) -> parens ("∀" <+> ppTyVar tv <> "." <+> e)
+  TExists tv (_,e) -> parens ("∃" <+> ppTyVar tv <> "." <+> e)
   TArrow (f',f) (_,a) ->
     case f' of
       Fix (TArrow{}) -> parens f <+> "→" <+> a

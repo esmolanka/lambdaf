@@ -6,6 +6,7 @@
 {-# LANGUAGE LambdaCase                 #-}
 {-# LANGUAGE MonoLocalBinds             #-}
 {-# LANGUAGE MultiParamTypeClasses      #-}
+{-# LANGUAGE OverloadedStrings          #-}
 {-# LANGUAGE ScopedTypeVariables        #-}
 {-# LANGUAGE TypeApplications           #-}
 {-# LANGUAGE TypeOperators              #-}
@@ -24,7 +25,6 @@ module Expr
 import Data.Functor.Foldable (Fix (..), unfix)
 import Data.Sum
 import qualified Data.Text as T
-import Data.Text.Prettyprint.Doc as PP
 
 import Syntax.Position
 import Utils
@@ -56,4 +56,4 @@ projLambda = project @(LambdaValue m) . unfix
 
 instance Pretty1 (LambdaValue m) where
   liftPretty _pp = \case
-    VLam _ -> pretty "<Lambda>"
+    VLam _ -> "<Lambda>"

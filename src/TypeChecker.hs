@@ -17,12 +17,13 @@
 module TypeChecker (runInfer, inferExprType) where
 
 import Control.Monad
-import Control.Effect.State
-import Control.Effect.Error
-import Control.Effect.Reader
-import Control.Effect.Writer
-import Control.Effect.Pure
+
 import Control.Effect.Carrier
+import Control.Effect.Error
+import Control.Effect.Pure
+import Control.Effect.Reader
+import Control.Effect.State
+import Control.Effect.Writer
 
 import Data.Foldable (toList, fold)
 import Data.Functor.Foldable (Fix (..), cata)
@@ -33,7 +34,7 @@ import qualified Data.Sequence as Seq
 import Data.Sum
 import Data.Text.Prettyprint.Doc as PP
 
--- import Debug.Trace
+import qualified Debug.Trace
 
 import Syntax.Position
 import Errors
@@ -43,19 +44,15 @@ import Utils
 import Pretty
 
 trace :: String -> a -> a
-trace = flip const
+trace = if True then Debug.Trace.trace else flip const
 
 isMono :: Type -> Bool
 isMono = getAll . cata alg
   where
     alg = \case
       TForall _ _ -> All False
+      TExists _ _ -> All False
       other -> fold other
-
-isForall :: Type -> Bool
-isForall = \case
-  Fix (TForall _ _) -> True
-  _other -> False
 
 data CtxMember
   = CtxVar    TVar
@@ -157,6 +154,8 @@ ctxUnsolved (Ctx ctx) =
             throwError $ OtherError $ "unbound meta variable ‘" ++ show v ++ "’"
         TForall v b ->
           local (▸ CtxVar v) b
+        TExists v b ->
+          local (▸ CtxVar v) b
         other -> sequence_ other
 
 freeMetaIn :: MetaVar -> Type -> Bool
@@ -214,26 +213,50 @@ freshMeta k = do
   modify (\s -> s { checkNextEVar = checkNextEVar s + 1 })
   pure $ MetaVar n k
 
-(≤) :: (TypeChecking sig, Carrier sig m) => Type -> Type -> m ()
+(≤) :: forall sig m. (TypeChecking sig, Carrier sig m) => Type -> Type -> m ()
 (≤) (Fix typeA) (Fix typeB) =
   getCtx >>= \ctx ->
-    trace (render $ vsep [ "tySub: " <+> ppType (Fix typeA) <+> "<" <+> ppType (Fix typeB), ppCtx ctx ]) $
-      typeA ≤· typeB
+    trace (render $ vsep [ "Checking:" <+> ppType (Fix typeA) <+> "≤" <+> ppType (Fix typeB), ppCtx ctx ]) $
+      runReader id (typeA ≤⋆ typeB)
   where
-    (≤·) :: (TypeChecking sig, Carrier sig m) => TypeF Type -> TypeF Type -> m ()
-
-    TForall v a ≤· b | not (isForall (Fix b)) = do
-      ma <- freshMeta (tvKind v)
-      let a' = subst (v, Fix (TMeta ma)) a
-      modifyCtx (\c -> c ▸ CtxMarker ma ▸ CtxMeta ma)
-      a' ≤ Fix b
-      modifyCtx (ctxDrop (CtxMarker ma))
-
-    a ≤· TForall v b = do
+    (≤⋆) :: (TypeChecking sig, Carrier sig m) => TypeF Type -> TypeF Type -> ReaderC (m () -> m ()) m ()
+    a ≤⋆ TForall v (Fix b) = do
       modifyCtx (▸ CtxVar v)
-      Fix a ≤ b
+      a ≤⋆ b
       modifyCtx (ctxDrop (CtxVar v))
 
+    TExists v (Fix a) ≤⋆ b = do
+      modifyCtx (▸ CtxVar v)
+      a ≤⋆ b
+      modifyCtx (ctxDrop (CtxVar v))
+
+    TForall v a ≤⋆ b = do
+      ma <- freshMeta (tvKind v)
+      let Fix a' = subst (v, Fix (TMeta ma)) a
+      local @(m () -> m ())
+        (\wrap act ->
+           wrap $
+             modifyCtx (\c -> c ▸ CtxMarker ma ▸ CtxMeta ma) >>
+             act >>
+             modifyCtx (ctxDrop (CtxMarker ma)))
+        (a' ≤⋆ b)
+
+    a ≤⋆ TExists v b = do
+      mb <- freshMeta (tvKind v)
+      let Fix b' = subst (v, Fix (TMeta mb)) b
+      local @(m () -> m ())
+        (\wrap act ->
+           wrap $
+             modifyCtx (\c -> c ▸ CtxMarker mb ▸ CtxMeta mb) >>
+             act >>
+             modifyCtx (ctxDrop (CtxMarker mb)))
+        (a ≤⋆ b')
+
+    monoA ≤⋆ monoB =
+      ask @(m () -> m ()) >>= \wrapper ->
+        ReaderC (\_ -> wrapper (monoA ≤· monoB))
+
+    (≤·) :: (TypeChecking sig, Carrier sig m) => TypeF Type -> TypeF Type -> m ()
     TRef a   ≤· TRef b  | a == b = return ()
     TMeta a  ≤· TMeta b | a == b = return ()
     TCtor a  ≤· TCtor b | a == b = return ()
@@ -360,6 +383,19 @@ instantiate dir ma t = getCtx >>= go
     instantiate dir ma (subst (b, Fix (TMeta ma')) s)
     modifyCtx (ctxDrop (CtxMarker ma'))
 
+  -- InstLExistsR
+  go ctx | Fix (TExists b s) <- t, Rigid <- dir = do
+    ma' <- freshMeta (tvKind b)
+    putCtx $ ctx ▸ CtxMarker ma' ▸ CtxMeta ma'
+    instantiate dir ma (subst (b, Fix (TMeta ma')) s)
+    modifyCtx (ctxDrop (CtxMarker ma'))
+
+  -- InstRExistsL
+  go ctx | Fix (TExists b s) <- t, Flex <- dir = do
+    putCtx $ ctx ▸ CtxVar b
+    instantiate dir ma s
+    modifyCtx (ctxDrop (CtxVar b))
+
   -- InstOther
   go ctx | Just (l, r) <- ctxHole (CtxMeta ma) ctx, Fix t' <- t = do
     (tasks :: [(MetaVar, Type)], t'') <- runWriter $ forM t' $ \a -> do
@@ -380,6 +416,12 @@ check e (Fix (TForall v a)) = do
   modifyCtx (▸ CtxVar v)
   check e a
   modifyCtx (ctxDrop (CtxVar v))
+
+check e (Fix (TExists v a)) = do
+  ma' <- freshMeta (tvKind v)
+  modifyCtx $ \ctx -> ctx ▸ CtxMarker ma' ▸ CtxMeta ma'
+  check e (subst (v, Fix (TMeta ma')) a)
+  modifyCtx (ctxDrop (CtxMarker ma'))
 
 check (Fix (Lambda _ x e)) (Fix (TArrow a b)) = do
   modifyCtx (▸ CtxAssump x a)
@@ -444,6 +486,12 @@ inferApp (Fix (TForall v a)) e = do
   modifyCtx (▸ CtxMeta ma)
   inferApp (subst (v, Fix (TMeta ma)) a) e
 
+inferApp (Fix (TExists v a)) e = do
+  modifyCtx (▸ CtxVar v)
+  t <- inferApp a e
+  modifyCtx (ctxDrop (CtxVar v))
+  return t
+
 inferApp (Fix (TMeta ma)) e = do
   ma1 <- freshMeta Star
   ma2 <- freshMeta Star
@@ -471,6 +519,7 @@ inferKind pos = cata (alg <=< sequence)
       TRef tv              -> return (tvKind tv)
       TMeta tv             -> return (etvKind tv)
       TForall _ k          -> return k
+      TExists _ k          -> return k
       T _                  -> return Star
       TE _                 -> return EStar
       TExpr EStar          -> return Star
@@ -482,7 +531,7 @@ inferKind pos = cata (alg <=< sequence)
       TAbsent              -> return Presence
       TRowEmpty            -> return Row
       TRowExtend _
-         Presence Star Row -> return Row
+        Presence Star Row  -> return Row
       other                -> throwError (TCError pos (IllKindedType other))
 
 ----------------------------------------------------------------------
@@ -502,3 +551,14 @@ inferExprType expr = do
   t <- infer expr
   ctx <- getCtx
   pure (applySolutions ctx t, Fix TRowEmpty)
+
+----------------------------------------------------------------------
+
+(≥) :: (TypeChecking sig, Carrier sig m) => Type -> Type -> m ()
+(≥) = flip (≤)
+
+-- >>> :set -XOverloadedStrings
+-- >>> runInfer $ Fix (TForall (TVar 0 Star) (Fix (TRef (TVar 0 Star)))) ≤ Fix (TExists (TVar 1 Star) (Fix (TRef (TVar 1 Star))))
+-- Checking: (∀ α0. α0) ≤ (∃ α1. α1)
+--
+-- Right ()
