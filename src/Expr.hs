@@ -15,6 +15,7 @@
 module Expr
   ( Expr
   , ExprF(..)
+  , exprPosition
   , Value
   , Variable(..)
   , LambdaValue(..)
@@ -44,6 +45,15 @@ data ExprF (p :: [*]) e
   | Annot  Position e Type
   | Prim   Position (Sum' p)
     deriving (Functor)
+
+exprPosition :: Expr p -> Position
+exprPosition (Fix e) = case e of
+  Ref pos _  -> pos
+  Lambda pos _ _ -> pos
+  App pos _ _ -> pos
+  Let pos _ _ _ -> pos
+  Annot pos _ _ -> pos
+  Prim pos _ -> pos
 
 data LambdaValue m e
   = VLam (e -> m e)

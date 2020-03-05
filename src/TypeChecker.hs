@@ -187,6 +187,7 @@ subst (v, s) = cata alg
 type TypeChecking sig =
   ( Member (State CheckState) sig
   , Member (Error TCError) sig
+  , Member (Reader Position) sig
   , Effect sig
   )
 
@@ -263,7 +264,7 @@ freshMeta k = do
 
     TApp f a ≤· TApp g b = do
       case filter isMono [f, g, a, b] of
-        (t : _) -> throwError $ TCError dummyPos $ ImpredicativePolymoprhism t
+        (t : _) -> ask @Position >>= \pos -> throwError $ TCError pos $ ImpredicativePolymoprhism t
         []      -> pure ()
       f ≤ g
       getCtx >>= \ctx -> applySolutions ctx a ≤ applySolutions ctx b
@@ -290,7 +291,8 @@ freshMeta k = do
 
     TRowEmpty ≤· TRowEmpty = pure ()
     TRowExtend lbl pty fty tail_ ≤· TRowExtend lbl' pty' fty' tail' = do
-      (pty'', fty'', tail'') <- rewriteRow dummyPos lbl lbl' pty' fty' tail'
+      pos <- ask @Position
+      (pty'', fty'', tail'') <- rewriteRow pos lbl lbl' pty' fty' tail'
       getCtx >>= \ctx -> applySolutions ctx pty   ≤ applySolutions ctx pty''
       getCtx >>= \ctx -> applySolutions ctx fty   ≤ applySolutions ctx fty''
       getCtx >>= \ctx -> applySolutions ctx tail_ ≤ applySolutions ctx tail''
@@ -301,7 +303,7 @@ freshMeta k = do
     TRowExtend lbl p f rest ≤· TRowEmpty =
       (Fix (TRowExtend lbl p f rest)) ≤ (Fix (TRowExtend lbl (Fix TAbsent) f (Fix TRowEmpty)))
 
-    a ≤· b = throwError $ TCError dummyPos $ CannotUnify (Fix b) (Fix a)
+    a ≤· b = ask @Position >>= \pos -> throwError $ TCError pos $ CannotUnify (Fix b) (Fix a)
 
 rewriteRow
   :: (TypeChecking sig, Carrier sig m) =>
@@ -430,21 +432,22 @@ check (Fix (Lambda _ x e)) (Fix (TArrow a b)) = do
 
 check e b = do
   a <- infer e
-  getCtx >>= \ctx -> applySolutions ctx a ≤ applySolutions ctx b
+  local @Position (const (exprPosition e)) $
+    getCtx >>= \ctx -> applySolutions ctx a ≤ applySolutions ctx b
 
 ----------------------------------------------------------------------
 
 infer :: (TypeChecking sig, Carrier sig m, TypePrim (Sum (Map Const p))) => Expr p -> m Type
-infer (Fix (Ref _ x)) = do
+infer (Fix (Ref pos x)) = do
   ctx <- getCtx
   case ctxAssump ctx x of
-    Nothing -> throwError $ TCError dummyPos $ VariableNotFound x
+    Nothing -> throwError $ TCError pos $ VariableNotFound x
     Just t  -> return t
 
-infer (Fix (Annot _ e t)) = do
+infer (Fix (Annot pos e t)) = do
   ctx <- getCtx
   case ctx ⊢ t of
-    Left reason -> throwError $ TCError dummyPos $ reason
+    Left reason -> throwError $ TCError pos $ reason
     Right ()    -> check e t >> return t
 
 infer (Fix (Lambda _ x e)) = do
@@ -505,8 +508,8 @@ inferApp (Fix (TArrow a c)) e = do
   check e a
   return c
 
-inferApp t _e =
-  throwError $ TCError dummyPos $
+inferApp t e =
+  throwError $ TCError (exprPosition e) $
     OtherError $ "cannot apply to expression of type " ++ show (ppType t)
 
 ----------------------------------------------------------------------
@@ -536,10 +539,10 @@ inferKind pos = cata (alg <=< sequence)
 
 ----------------------------------------------------------------------
 
-type InferM = ErrorC TCError (StateC CheckState PureC)
+type InferM = ErrorC TCError (StateC CheckState (ReaderC Position PureC))
 
 runInfer :: InferM a -> Either TCError a
-runInfer = runPureC . evalState defCheckState . runError
+runInfer = runPureC . runReader dummyPos . evalState defCheckState . runError
 
 inferExprType
   :: forall m sig p.
