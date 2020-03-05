@@ -43,7 +43,7 @@ import Types
 
 instance PrettyPrim (Const LinkPrim) where
   prettyPrim = \case
-    Const (Link t) -> "Link" <> ppType t
+    Const Link -> "Link"
 
 instance ( Member (RuntimeErrorEffect) sig
          , Member (EnvEffect v) sig
@@ -58,7 +58,7 @@ instance ( Member (RuntimeErrorEffect) sig
          , AnfValue :< v
          ) => EvalPrim m v (Const LinkPrim) where
   evalPrim = \case
-      Const (Link t) -> do
+      Const Link -> do
         pure $ mkVLam @m $ \c ->
           case projBase c of
             Just (VText fn) -> do
@@ -66,22 +66,21 @@ instance ( Member (RuntimeErrorEffect) sig
               expr <- case Language.SexpGrammar.decodeWith sugaredGrammar (T.unpack fn) src of
                 Left err -> evalError $ "Link:\n" ++ err
                 Right sug -> pure (desugar sug :: Expr '[BasePrim, RecordPrim, VariantPrim, AnfPrim, IOPrim, LinkPrim, ExceptionPrim])
-              case runInfer (inferExprType expr) of
+              case runInfer (check expr (Fix (T TDouble))) of
                 Left tcerror -> evalError $ "Link:\n" ++ render (ppError tcerror)
-                Right (t', _e)
-                  | t == t' ->
-                    pure $ mkVLam @m $ \_ ->
-                      localEnv @v (const M.empty) (eval expr)
-                  | otherwise -> evalError "Link: types did not match."
+                Right _ ->
+                  pure $ mkVLam @m $ \_ ->
+                    localEnv @v (const M.empty) (eval expr)
 
-            _ -> evalError "ReadLn: expected Unit"
+            _ -> evalError "Link: expected Text"
 
 instance TypePrim (Const LinkPrim) where
   typePrim = \case
-    Const (Link t) ->
+    Const Link ->
+      forall Star $ \a ->
       effect $ \e1 ->
       effect $ \e2 ->
       mono $
         (Fix (T TText), Fix $ TRowExtend ioEff (Fix TPresent) (Fix (T TUnit)) e1) ~>
         (Fix (T TUnit), e2) ~>
-        t
+        a

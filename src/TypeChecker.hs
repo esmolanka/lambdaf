@@ -14,7 +14,7 @@
 {-# LANGUAGE TypeOperators              #-}
 {-# LANGUAGE UndecidableInstances       #-}
 
-module TypeChecker (runInfer, inferExprType) where
+module TypeChecker (runInfer, check, inferExprType) where
 
 import Control.Monad
 
@@ -44,7 +44,7 @@ import Utils
 import Pretty
 
 trace :: String -> a -> a
-trace = if True then Debug.Trace.trace else flip const
+trace = if False then Debug.Trace.trace else flip const
 
 isMono :: Type -> Bool
 isMono = getAll . cata alg

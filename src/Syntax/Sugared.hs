@@ -269,7 +269,7 @@ primitives _ = M.fromList
   , (Variable "writeln",     (0, inject' Raw.WriteLn))
   , (Variable "^",           (0, inject' Raw.EConst))
   , (Variable "^+",          (0, inject' (Raw.EPrim Raw.EAdd)))
-  , (Variable "link-double", (0, inject' (Raw.Link (Fix (T (TDouble))))))
+  , (Variable "link",        (0, inject' Raw.Link))
   , (Variable "raise",       (0, inject' Raw.RaiseExc))
   ]
 
