@@ -1,0 +1,11 @@
+(let
+    ([fun (lambda (foo)
+              (+ (case foo
+                   [(Foo x) (+ x 1)]
+                   [(Bar x) (+ x 2)])
+                 (case foo
+                   [(Foo x) (+ x 1)]
+                   ;; [(Bar x) (+ x 2)]
+                   )))]
+      [foo (Foo 45)])
+  {:fun fun :foo foo :applied (fun foo)})

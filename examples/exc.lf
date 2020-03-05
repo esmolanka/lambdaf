@@ -2,5 +2,5 @@
             (if x 0 (raise (WrongNumber {:reason 42})))
             (writeln "OK"))
        [(WrongNumber x)
-        (do (writeln "Caught an expcetion with reason:")
+        (do (writeln "Caught an exception with reason:")
             (writeln (shownum (:reason x))))])

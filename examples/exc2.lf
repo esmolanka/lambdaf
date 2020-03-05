@@ -28,5 +28,5 @@
       (writeln "Will catch too big (>9000):")
       (catch-too-big computation)
 
-      (writeln "Will catch both exeptions:")
+      (writeln "Will catch both exceptions:")
       (ensure-no-exceptions `(catch-negative `(catch-too-big computation)))))
