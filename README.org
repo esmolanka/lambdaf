@@ -4,9 +4,10 @@ la carte.
 * Parts
   - ~Expr.hs~ -- bare lambda calculus
   - ~Prim/Base.hs~ -- base primitives and values (unit, pair, double)
-  - ~Prim/Anf.hs~ -- primitives and values for ANF expressions of a residual
+  - ~Prim/Kappa.hs~ -- primitives and values for kappa calculus residual
     program of a two-level language
   - ~Prim/Record.hs~ -- support of records (create, extend, select)
+  - ~Prim/Variant.hs~ -- support of variants (create, eliminate)
   - ~Prim/IO.hs~ -- support of IO (read line from stdin, write line to stdout)
   - ~Prim/Exception.hs~ -- support of exceptions (raise, catch)
   - ~Prim/Link.hs~ -- support of dynamic loading of expressions from other

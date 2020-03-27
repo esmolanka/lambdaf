@@ -1,5 +1,28 @@
 (let
-  ([length (kappa (xs) (^const 0) xs (^fold (kappa (x acc) (^const 1) acc ^add)))]
-   [sum    (kappa (xs) (^const 0) xs (^fold ^add))]
-   [avg    (kappa (xs) xs length xs sum ^div)])
- (kappa () (^vector [1 2 3]) avg))
+  ([length                    ;; host language let binding
+     (kappa (xs)              ;; capture an input vector
+       (^const 0)             ;; push an initial value of fold
+       xs                     ;; push a vector
+       (^fold                 ;; invoke a second-order folding primitive
+         (kappa (x)           ;; parametrised by a function that takes an element (ignored in function body)
+           (^const 1)         ;; push 1
+           ^add))             ;; add to implicitly referred accumulator
+     )]
+   [sum
+     (kappa (xs)              ;; capture an input vector
+       (^const 0)             ;; push an initial value of fold
+       xs                     ;; push an input vector
+       (^fold ^add)           ;; fold with ^add function (EDouble :: EDouble :: t => EDouble :: t)
+     )]
+   [avg
+     (kappa (xs)              ;; capture an input vector
+       xs                     ;; push it back
+       length                 ;; calculate length
+       xs                     ;; push the vector again (this is why we had to capture it)
+       sum                    ;; calculate sum
+       ^div                   ;; divide sum by the length
+     )])
+  (kappa ()
+     (^vector [100 200 135])  ;; push an example vector
+     avg                      ;; insert a kappa from a let-binding
+  ))

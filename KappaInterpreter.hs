@@ -2,7 +2,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE LambdaCase       #-}
 
-module Kappa2 where
+module KappaInterpreter where
 
 import Control.Monad
 import Control.Monad.IO.Class
@@ -163,7 +163,4 @@ infixr 4 >>>
 
 -- >>> go $ EComp (EPrim (EVec [100, 200, 135])) (EKappa (EVar 104) (EComp (ERef (EVar 104)) (EComp (EKappa (EVar 100) (EComp (EPrim (ELit 0.0)) (EComp (ERef (EVar 100)) (EPrim1 EFold (EKappa (EVar 101) (EKappa (EVar 102) (EComp (EPrim (ELit 1.0)) (EComp (ERef (EVar 102)) (EPrim EAdd))))))))) (EComp (ERef (EVar 104)) (EComp (EKappa (EVar 103) (EComp (EPrim (ELit 0.0)) (EComp (ERef (EVar 103)) (EPrim1 EFold (EPrim EAdd))))) (EPrim EDiv))))))
 -- Right (Stack [VDouble 145.0])
-
-
-
 
