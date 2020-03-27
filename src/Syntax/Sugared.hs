@@ -33,13 +33,14 @@ import Language.SexpGrammar.Generic
 
 import Expr (Variable(..))
 import qualified Expr as Raw
-import qualified Prim.Anf as Raw (AnfPrim(..), EPrim(..))
+-- import qualified Prim.Anf as Raw (AnfPrim(..), EPrim(..))
 import qualified Prim.Base as Raw (BasePrim(..))
 import qualified Prim.Exception as Raw (ExceptionPrim(..))
 import qualified Prim.IO as Raw (IOPrim(..))
 import qualified Prim.Link.Types as Raw (LinkPrim(..))
 import qualified Prim.Record as Raw (RecordPrim(..))
 import qualified Prim.Variant as Raw (VariantPrim(..))
+import qualified Prim.Kappa as Raw (KappaPrim(..), EPrim(..), EPrim1(..))
 import qualified Syntax.Position as Raw
 import Types
 import Utils
@@ -71,6 +72,7 @@ data SugaredF e
   | Let     Position (LetBinding e) [LetBinding e] e
   | Literal Position Literal
   | If      Position e e e
+  | MkList  Position [e]
   | MkTuple Position e e [e]
   | MkRec   Position [(Label, e)]
   | RecProj Position Label e
@@ -81,7 +83,8 @@ data SugaredF e
   | Delay   Position e
   | Force   Position e
   | DoBlock Position [SeqBinding e]
-  | Loop    Position Variable [Variable] e
+  -- | Loop    Position Variable [Variable] e
+  | Kappa   Position [Variable] [e]
   | Catch   Position e [VariantMatchLeg e]
     deriving (Generic)
 
@@ -93,7 +96,7 @@ desugar :: forall p.
   , Raw.RecordPrim :<< p
   , Raw.VariantPrim :<< p
   , Raw.IOPrim :<< p
-  , Raw.AnfPrim :<< p
+  , Raw.KappaPrim :<< p
   , Raw.LinkPrim :<< p
   , Raw.ExceptionPrim :<< p
   ) => Sugared -> Raw.Expr p
@@ -144,6 +147,11 @@ desugar = resolvePrimitives . futu coalg
             , mkLambda (dsPos pos) [dummyVar] (Pure tr)
             , mkLambda (dsPos pos) [dummyVar] (Pure fls)
             ]
+
+      Fix (MkList pos xs) ->
+        let lnil  = Free $ Raw.Prim (dsPos pos) (inject' Raw.ListNil)
+            lcons x xs' = mkApp (dsPos pos) (Free $ Raw.Prim (dsPos pos) (inject' Raw.ListCons)) [Pure x, xs']
+        in unFree $ foldr lcons lnil xs
 
       Fix (MkTuple pos a b cs) ->
         let ultimate = last (a : b : cs)
@@ -225,17 +233,30 @@ desugar = resolvePrimitives . futu coalg
                       OrdinarySeqBinding x e -> mkSeq pos x e (Free (Raw.Ref (dsPos pos) x)))
                   (init stmts)
 
-      Fix (Loop pos x xs body) ->
-        let primLoop = Free (Raw.Prim (dsPos pos) (inject' Raw.ELoop))
-            primRet  = Free (Raw.Prim (dsPos pos) (inject' Raw.EReturn))
-            app f a  = Free (Raw.App (dsPos pos) f a)
-            lam v b  = Free (Raw.Lambda (dsPos pos) v b)
+      -- Fix (Loop pos x xs body) ->
+      --   let primLoop = Free (Raw.Prim (dsPos pos) (inject' Raw.ELoop))
+      --       primRet  = Free (Raw.Prim (dsPos pos) (inject' Raw.EReturn))
+      --       app f a  = Free (Raw.App (dsPos pos) f a)
+      --       lam v b  = Free (Raw.Lambda (dsPos pos) v b)
+      --   in unFree $
+      --        app primRet $
+      --        foldr
+      --          (\bnd rest_ -> primLoop `app` lam bnd rest_)
+      --          (Pure body)
+      --          (reverse (x : xs))
+
+      Fix (Kappa pos xs stmts) ->
+        let app f a = Free (Raw.App (dsPos pos) f a)
+            lam v b = Free (Raw.Lambda (dsPos pos) v b)
+            primKappa = Free (Raw.Prim (dsPos pos) (inject' Raw.KKappa))
+            primComp  = Free (Raw.Prim (dsPos pos) (inject' Raw.KComp))
+            wrap_ x rest_ = primKappa `app` lam x rest_
+            compose x rest_ = (primComp `app` x) `app` rest_
+            body = case stmts of
+                     [] -> Free (Raw.Prim (dsPos pos) (inject' (Raw.KPrim Raw.EId)))
+                     (_ : _) -> foldr1 compose (map Pure stmts)
         in unFree $
-             app primRet $
-             foldr
-               (\bnd rest_ -> primLoop `app` lam bnd rest_)
-               (Pure body)
-               (reverse (x : xs))
+             foldr wrap_ body xs
 
       Fix (Catch pos cont handlers) ->
         let primDecomp lbl = Free (Raw.Prim (dsPos pos) (inject' (Raw.VariantDecomp lbl)))
@@ -257,7 +278,7 @@ desugar = resolvePrimitives . futu coalg
 primitives :: forall p proxy.
   ( Raw.BasePrim :<< p
   , Raw.IOPrim :<< p
-  , Raw.AnfPrim :<< p
+  , Raw.KappaPrim :<< p
   , Raw.LinkPrim :<< p
   , Raw.ExceptionPrim :<< p
   ) => proxy p -> M.Map Variable (Int, Sum' p)
@@ -267,8 +288,15 @@ primitives _ = M.fromList
   , (Variable "shownum",     (0, inject' Raw.ShowDouble))
   , (Variable "readln",      (0, inject' Raw.ReadLn))
   , (Variable "writeln",     (0, inject' Raw.WriteLn))
-  , (Variable "^",           (0, inject' Raw.EConst))
-  , (Variable "^+",          (0, inject' (Raw.EPrim Raw.EAdd)))
+  , (Variable "cons",        (0, inject' Raw.ListCons))
+  , (Variable "^const",      (0, inject' Raw.KConst))
+  , (Variable "^vector",     (0, inject' Raw.KVec))
+  , (Variable "^add",        (0, inject' (Raw.KPrim Raw.EAdd)))
+  , (Variable "^mul",        (0, inject' (Raw.KPrim Raw.EMul)))
+  , (Variable "^sub",        (0, inject' (Raw.KPrim Raw.ESub)))
+  , (Variable "^div",        (0, inject' (Raw.KPrim Raw.EDiv)))
+  , (Variable "^loop",       (0, inject' Raw.KLoop))
+  , (Variable "^fold",       (0, inject' (Raw.KPrim1 Raw.EFold)))
   , (Variable "link",        (0, inject' Raw.Link))
   , (Variable "raise",       (0, inject' Raw.RaiseExc))
   ]
@@ -277,7 +305,7 @@ resolvePrimitives ::
   forall p.
   ( Raw.BasePrim :<< p
   , Raw.IOPrim :<< p
-  , Raw.AnfPrim :<< p
+  , Raw.KappaPrim :<< p
   , Raw.LinkPrim :<< p
   , Raw.ExceptionPrim :<< p
   ) => Raw.Expr p -> Raw.Expr p
@@ -327,7 +355,7 @@ varGrammar =
   where
     parseVar :: Text -> Either Mismatch Variable
     parseVar t
-      | t `elem` ["lambda","let","if","case","catch","do","loop","=","<-","**","tt","ff"] = Left (unexpected t)
+      | t `elem` ["lambda","let","if","case","catch","do","loop","kappa","=","<-","**","tt","ff"] = Left (unexpected t)
       | Just (h, _) <- uncons t, h == ':' || isUpper h = Left (unexpected t)
       | otherwise = Right (Variable t)
 
@@ -463,6 +491,12 @@ sugaredGrammar = fixG $ match
               el sugaredGrammar) >>>
              ifp)
 
+  $ With (\mklist ->
+            position >>>
+            swap >>>
+            bracketList (
+             rest sugaredGrammar) >>> mklist)
+
   $ With (\mktuple ->
             position >>>
             swap >>>
@@ -554,17 +588,27 @@ sugaredGrammar = fixG $ match
                    onTail cons) >>>
              doblock)
 
-  $ With (\loop ->
-             annotated "loop" $
+  -- $ With (\loop ->
+  --            annotated "loop" $
+  --            position >>>
+  --            swap >>>
+  --            list (
+  --              el (sym "loop") >>>
+  --              el (list (
+  --                    el varGrammar >>>
+  --                    rest varGrammar)) >>>
+  --              el sugaredGrammar) >>>
+  --            loop)
+
+    $ With (\kappa ->
+             annotated "kappa expression" $
              position >>>
              swap >>>
              list (
-               el (sym "loop") >>>
-               el (list (
-                     el varGrammar >>>
-                     rest varGrammar)) >>>
-               el sugaredGrammar) >>>
-             loop)
+               el (sym "kappa") >>>
+               el (list (rest varGrammar)) >>>
+               rest sugaredGrammar) >>>
+             kappa)
 
     $ With (\catch_ ->
              annotated "catch expression" $

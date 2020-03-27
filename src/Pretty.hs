@@ -31,41 +31,53 @@ ppLabel :: Label -> Doc ann
 ppLabel (Label s) = pretty s
 
 ppKind :: Kind -> Doc ann
+ppKind (Arr a@Arr{} b) = parens (ppKind a) <+> "→" <+> ppKind b
+ppKind (Arr a b) = ppKind a <+> "→" <+> ppKind b
 ppKind Star     = "⋆"
 ppKind Row      = "ROW"
 ppKind Presence = "PRE"
 ppKind EStar    = "⋆̂"
+ppKind EStack   = "STACK"
 
 
 ppTyVar :: TVar -> Doc ann
 ppTyVar (TVar n k) = ppPrefix k <> pretty n
   where
+    ppPrefix Arr{}    = "α"
     ppPrefix Star     = "α"
     ppPrefix Row      = "ρ"
     ppPrefix Presence = "ω"
     ppPrefix EStar    = "β"
+    ppPrefix EStack   = "τ"
 
 ppMetaVar :: MetaVar -> Doc ann
 ppMetaVar (MetaVar n k) = ppPrefix k <> pretty n
   where
+    ppPrefix Arr{}    = "α̂"
     ppPrefix Star     = "α̂"
     ppPrefix Row      = "ρ̂"
     ppPrefix Presence = "ω̂"
     ppPrefix EStar    = "β̂"
+    ppPrefix EStack   = "τ̂"
 
 ppBaseType :: BaseType -> Doc ann
 ppBaseType = fromString . drop 1 . show
 
-ppAnfType :: EType -> Doc ann
-ppAnfType = fromString . drop 1 . show
+ppEType :: EType -> Doc ann
+ppEType = fromString . drop 1 . show
 
 ppType :: Type -> Doc ann
 ppType = (group .) . para $ \case
   T c -> ppBaseType c
-  TE c -> ppAnfType c
+
+  TE c -> ppEType c
+
+  TSNil -> "ε"
+  TSCons (_,h) (_,t) -> h <+> "::" <+> t
+  TKappa (_,a) (_,b) -> "⟨" <> a <+> "=>" <+> b <> "⟩"
+
   TCtor name -> pretty name
   TApp (_,a) (_,b) -> a <+> b
-  TExpr (_, t) -> "Expr" <+> t
   TRef tv -> ppTyVar tv
   TMeta tv -> ppMetaVar tv
   TForall tv (_,e) -> parens ("∀" <+> ppTyVar tv <> "." <+> e)

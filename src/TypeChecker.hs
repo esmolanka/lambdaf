@@ -263,7 +263,7 @@ freshMeta k = do
     TCtor a  ≤· TCtor b | a == b = return ()
 
     TApp f a ≤· TApp g b = do
-      case filter isMono [f, g, a, b] of
+      case filter (not . isMono) [f, g, a, b] of
         (t : _) -> ask @Position >>= \pos -> throwError $ TCError pos $ ImpredicativePolymoprhism t
         []      -> pure ()
       f ≤ g
@@ -278,9 +278,17 @@ freshMeta k = do
 
     T a  ≤· T b  | a == b = pure ()
     TE a ≤· TE b | a == b = pure ()
-    TExpr x ≤· TExpr y = x ≤ y
+
     TPair a b ≤· TPair a' b' = do
       a ≤ a'
+      getCtx >>= \ctx -> applySolutions ctx b ≤ applySolutions ctx b'
+
+    TSNil ≤· TSNil = pure ()
+    TSCons h t ≤· TSCons h' t' = do
+      h ≤ h'
+      getCtx >>= \ctx -> applySolutions ctx t ≤ applySolutions ctx t'
+    TKappa a b ≤· TKappa a' b' = do
+      a' ≤ a -- contravariant
       getCtx >>= \ctx -> applySolutions ctx b ≤ applySolutions ctx b'
 
     TRecord a ≤· TRecord a' = a ≤ a'
@@ -303,7 +311,8 @@ freshMeta k = do
     TRowExtend lbl p f rest ≤· TRowEmpty =
       (Fix (TRowExtend lbl p f rest)) ≤ (Fix (TRowExtend lbl (Fix TAbsent) f (Fix TRowEmpty)))
 
-    a ≤· b = ask @Position >>= \pos -> throwError $ TCError pos $ CannotUnify (Fix b) (Fix a)
+    a ≤· b = ask @Position >>= \pos -> -- Debug.Trace.trace (show a ++ "\n" ++ show b) $
+      throwError $ TCError pos $ CannotUnify (Fix b) (Fix a)
 
 rewriteRow
   :: (TypeChecking sig, Carrier sig m) =>
@@ -360,6 +369,14 @@ instantiate dir ma t = getCtx >>= go
     ma1 <- freshMeta Star
     ma2 <- freshMeta Star
     putCtx $ l ▸ CtxMeta ma2 ▸ CtxMeta ma2 ▸ CtxMeta ma1 ▸ CtxSolved ma (Fix (TArrow (Fix (TMeta ma1)) (Fix (TMeta ma2)))) <> r
+    instantiate (opposite dir) ma1 a
+    getCtx >>= \ctx' -> instantiate dir ma2 (applySolutions ctx' b)
+
+  -- Inst*Kappa
+  go ctx | Just (l, r) <- ctxHole (CtxMeta ma) ctx, Fix (TKappa a b) <- t = do
+    ma1 <- freshMeta EStack
+    ma2 <- freshMeta EStack
+    putCtx $ l ▸ CtxMeta ma2 ▸ CtxMeta ma2 ▸ CtxMeta ma1 ▸ CtxSolved ma (Fix (TKappa (Fix (TMeta ma1)) (Fix (TMeta ma2)))) <> r
     instantiate (opposite dir) ma1 a
     getCtx >>= \ctx' -> instantiate dir ma2 (applySolutions ctx' b)
 
@@ -517,15 +534,28 @@ inferApp t e =
 inferKind :: forall m sig. (TypeChecking sig, Carrier sig m) => Position -> Type -> m Kind
 inferKind pos = cata (alg <=< sequence)
   where
+    kinds =
+      [ ("Vec", EStar `Arr` EStar)
+      , ("List", Star `Arr` Star)
+      ]
+
     alg :: TypeF Kind -> m Kind
     alg = \case
       TRef tv              -> return (tvKind tv)
       TMeta tv             -> return (etvKind tv)
       TForall _ k          -> return k
       TExists _ k          -> return k
+
       T _                  -> return Star
       TE _                 -> return EStar
-      TExpr EStar          -> return Star
+
+      TCtor n | Just k <- lookup n kinds -> return k
+      TApp (Arr a b) c | a == c -> return b
+
+      TSNil                -> return EStack
+      TSCons EStar EStack  -> return EStack
+      TKappa EStack EStack -> return Star
+
       TArrow Star Star     -> return Star
       TPair Star Star      -> return Star
       TRecord Row          -> return Star

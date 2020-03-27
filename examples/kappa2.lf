@@ -1,0 +1,9 @@
+(let
+  ([avg
+     (kappa (xs)
+       (^const 0) (^const 0) xs
+       (^fold (kappa (x s l)
+                (^const 1) l ^add
+                x s ^add))
+       ^div)])
+ (kappa () (^vector [100 200 135]) avg))

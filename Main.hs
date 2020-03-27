@@ -28,10 +28,10 @@ import Errors
 import Eval
 import Expr
 import Pretty
-import Prim.Anf
 import Prim.Base
 import Prim.Exception
 import Prim.IO
+import Prim.Kappa
 import Prim.Link
 import Prim.Record
 import Prim.Variant
@@ -42,25 +42,25 @@ import Types (Type)
 ----------------------------------------------------------------------
 -- Concrete language
 
-type PrimTypes = '[BasePrim, RecordPrim, VariantPrim, AnfPrim, IOPrim, LinkPrim, ExceptionPrim]
-type ValueTypes = '[LambdaValue (Eval IO), BaseValue, RecordValue, VariantValue,AnfValue]
+type PrimTypes = '[BasePrim, RecordPrim, VariantPrim, KappaPrim, IOPrim, LinkPrim, ExceptionPrim]
+type ValueTypes = '[LambdaValue (Eval IO), BaseValue, RecordValue, VariantValue, KappaValue]
 
 newtype Eval m a = Eval
-  { unEval :: RuntimeErrorEffectC (ExceptionEffectC ValueTypes (EnvEffectC ValueTypes (AnfEffectC (LiftC m)))) a
+  { unEval :: RuntimeErrorEffectC (ExceptionEffectC ValueTypes (EnvEffectC ValueTypes (KappaEffectC (LiftC m)))) a
   } deriving (Functor, Applicative, Monad, MonadIO)
 
 instance (MonadIO m) => Carrier
     ( RuntimeErrorEffect
       :+: ExceptionEffect ValueTypes
       :+: EnvEffect ValueTypes
-      :+: AnfEffect
+      :+: KappaEffect
       :+: Lift m
     ) (Eval m) where
   eff x = Eval $ eff (hmap unEval x)
 
 runEval :: Eval IO a -> IO (Either String a)
 runEval k = do
-  result <- runM . runAnf . runEnv . runException . runRuntimeError . unEval $ k
+  result <- runM . runKappa . runEnv . runException . runRuntimeError . unEval $ k
   pure $ case result of
     Left unhandledException -> Left (render $ nest 2 $ vsep ["Unhandled exception:", ppValue unhandledException])
     Right (Left runtimeError) -> Left runtimeError

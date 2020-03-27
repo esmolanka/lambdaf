@@ -42,6 +42,8 @@ data BasePrim
   | ReadDouble
   | ShowDouble
   | Delay
+  | ListNil
+  | ListCons
   | MkPair
   | MkDouble Double
   | MkText Text
@@ -51,6 +53,7 @@ data BaseValue e
   = VDbl Double
   | VText Text
   | VPair e e
+  | VList [e]
   | VUnit
 
 mkVDbl :: (BaseValue :< v) => Double -> Value v
@@ -61,6 +64,9 @@ mkVText x = Fix . inject $ VText x
 
 mkVPair :: (BaseValue :< v) => Value v -> Value v -> Value v
 mkVPair a b = Fix . inject $ VPair a b
+
+mkVList :: (BaseValue :< v) => [Value v] -> Value v
+mkVList xs = Fix . inject $ VList xs
 
 mkVUnit :: (BaseValue :< v) => Value v
 mkVUnit = Fix . inject $ VUnit
@@ -73,6 +79,7 @@ instance Pretty1 BaseValue where
     VDbl x    -> pretty x
     VText x   -> pretty (show x)
     VPair a b -> parens (pp a <+> "**" <+> pp b)
+    VList xs  -> list (map pp xs)
     VUnit     -> "Unit"
 
 instance PrettyPrim (Const BasePrim) where
@@ -82,6 +89,8 @@ instance PrettyPrim (Const BasePrim) where
     Const ReadDouble   -> "ReadNum"
     Const ShowDouble   -> "ShowNum"
     Const Delay        -> "Delay"
+    Const ListNil      -> "Nil"
+    Const ListCons     -> "Cons"
     Const MkPair       -> "Pair"
     Const (MkDouble n) -> pretty n
     Const (MkText s)   -> pretty (show s)
@@ -135,6 +144,17 @@ instance ( Member RuntimeErrorEffect sig
             Just VUnit -> forceDelayed f
             _ -> evalError "Delay expects a unit"
 
+      Const ListNil ->
+        pure $ mkVList []
+
+      Const ListCons ->
+        pure $ mkVLam @m $ \x ->
+        pure $ mkVLam @m $ \xs ->
+          case projBase xs of
+            Just (VList xs') -> pure $ mkVList (x : xs')
+            _ -> evalError "Wrong arguments"
+
+
       Const MkPair ->
         pure $ mkVLam @m $ \a ->
         pure $ mkVLam @m $ \b ->
@@ -151,7 +171,7 @@ instance ( Member RuntimeErrorEffect sig
     where
       forceDelayed l =
         case projLambda l of
-          Just (VLam f) -> f mkVUnit
+          Just f -> f mkVUnit
           Nothing -> evalError "Cannot force a non-lambda"
 
 partialEff :: Label
@@ -191,6 +211,15 @@ instance TypePrim (Const BasePrim) where
       mono $
         ((Fix (T TUnit), e1) ~> a, e2) ~>
         ((Fix (T TUnit), e1) ~> a)
+    Const ListNil ->
+      forall Star $ \a ->
+      mono $ typeListOf a
+    Const ListCons ->
+      forall Star $ \a ->
+      effect $ \e1 ->
+      effect $ \e2 ->
+      mono $
+        (a, e1) ~> (typeListOf a, e2) ~> typeListOf a
     Const MkPair ->
       forall Star $ \a ->
       forall Star $ \b ->

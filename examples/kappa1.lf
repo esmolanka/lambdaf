@@ -1,0 +1,5 @@
+(let
+  ([length (kappa (xs) (^const 0) xs (^fold (kappa (x acc) (^const 1) acc ^add)))]
+   [sum    (kappa (xs) (^const 0) xs (^fold ^add))]
+   [avg    (kappa (xs) xs length xs sum ^div)])
+ (kappa () (^vector [1 2 3]) avg))

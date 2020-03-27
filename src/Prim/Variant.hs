@@ -62,9 +62,9 @@ instance ( Member RuntimeErrorEffect sig
       pure $ mkVLam @m $ \f ->
       pure $ mkVLam @m $ \v ->
         case projLambda g of
-          Just (VLam g') ->
+          Just g' ->
             case projLambda f of
-              Just (VLam f') ->
+              Just f' ->
                 case projVariant v of
                   Just (VVariant lbl' p) | lbl == lbl' -> g' p
                                          | otherwise   -> f' v

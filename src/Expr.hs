@@ -55,14 +55,14 @@ exprPosition (Fix e) = case e of
   Annot pos _ _ -> pos
   Prim pos _ -> pos
 
-data LambdaValue m e
+newtype LambdaValue m e
   = VLam (e -> m e)
 
 mkVLam :: forall m v. (LambdaValue m :< v) => (Value v -> m (Value v)) -> Value v
 mkVLam x = Fix . inject $ VLam x
 
-projLambda :: forall m v. (LambdaValue m :< v) => Value v -> Maybe (LambdaValue m (Value v))
-projLambda = project @(LambdaValue m) . unfix
+projLambda :: forall m v. (LambdaValue m :< v) => Value v -> Maybe (Value v -> m (Value v))
+projLambda = fmap (\(VLam f) -> f) . project @(LambdaValue m) . unfix
 
 instance Pretty1 (LambdaValue m) where
   liftPretty _pp = \case

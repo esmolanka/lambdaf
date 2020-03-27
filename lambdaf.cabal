@@ -21,14 +21,14 @@ library
     Expr
     Eval
     Pretty
-    Prim.Anf
     Prim.Base
+    Prim.Exception
     Prim.IO
-    Prim.Record
-    Prim.Variant
+    Prim.Kappa
     Prim.Link
     Prim.Link.Types
-    Prim.Exception
+    Prim.Record
+    Prim.Variant
     Syntax.Position
     Syntax.Sugared
     TypeChecker

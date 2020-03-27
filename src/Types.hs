@@ -5,6 +5,7 @@
 {-# LANGUAGE FlexibleInstances    #-}
 {-# LANGUAGE KindSignatures       #-}
 {-# LANGUAGE LambdaCase           #-}
+{-# LANGUAGE OverloadedStrings    #-}
 {-# LANGUAGE StandaloneDeriving   #-}
 {-# LANGUAGE TypeApplications     #-}
 {-# LANGUAGE UndecidableInstances #-}
@@ -26,6 +27,10 @@ module Types
   , effect
   , mono
   , (~>)
+  , (#:)
+  , (@:)
+  , typeListOf
+  , typeVectorOf
   ) where
 
 import Control.Monad
@@ -46,10 +51,12 @@ instance IsString Label where
   fromString = Label . fromString
 
 data Kind
-  = Star
+  = Arr Kind Kind
+  | Star
   | Row
   | Presence
   | EStar
+  | EStack
   deriving (Show, Eq, Ord)
 
 data TVar = TVar
@@ -94,8 +101,11 @@ data TypeF e
   | TRowEmpty              -- ROW
   | TRowExtend Label e e e -- PRESENCE -> STAR -> ROW -> ROW
 
-  | TE EType               -- ANF
-  | TExpr e                -- ANF -> STAR
+  | TE EType               -- ESTAR
+
+  | TSNil                  -- ESTACK
+  | TSCons e e             -- ESTAR -> ESTACK -> ESTACK
+  | TKappa e e             -- ESTACK -> ESTACK -> STAR
   deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic1)
 
 instance Eq1 TypeF where
@@ -155,3 +165,17 @@ infixr 3 ~>
 
 (~>) :: (Type, Type) -> Type -> Type
 (a, _e) ~> b = Fix (TArrow a b)
+
+(#:) :: Type -> Type -> Type
+(#:) a b = Fix (TSCons a b)
+infixr 5 #:
+
+(@:) :: Type -> Type -> Type
+(@:) f a = Fix (TApp f a)
+infixr 7 @:
+
+typeVectorOf :: Type -> Type
+typeVectorOf a = (Fix (TCtor "Vec") @: a)
+
+typeListOf :: Type -> Type
+typeListOf a = (Fix (TCtor "List") @: a)
