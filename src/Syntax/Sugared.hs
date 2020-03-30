@@ -83,7 +83,6 @@ data SugaredF e
   | Delay   Position e
   | Force   Position e
   | DoBlock Position [SeqBinding e]
-  -- | Loop    Position Variable [Variable] e
   | Kappa   Position [Variable] [e]
   | Catch   Position e [VariantMatchLeg e]
     deriving (Generic)
@@ -233,18 +232,6 @@ desugar = resolvePrimitives . futu coalg
                       OrdinarySeqBinding x e -> mkSeq pos x e (Free (Raw.Ref (dsPos pos) x)))
                   (init stmts)
 
-      -- Fix (Loop pos x xs body) ->
-      --   let primLoop = Free (Raw.Prim (dsPos pos) (inject' Raw.ELoop))
-      --       primRet  = Free (Raw.Prim (dsPos pos) (inject' Raw.EReturn))
-      --       app f a  = Free (Raw.App (dsPos pos) f a)
-      --       lam v b  = Free (Raw.Lambda (dsPos pos) v b)
-      --   in unFree $
-      --        app primRet $
-      --        foldr
-      --          (\bnd rest_ -> primLoop `app` lam bnd rest_)
-      --          (Pure body)
-      --          (reverse (x : xs))
-
       Fix (Kappa pos xs stmts) ->
         let app f a = Free (Raw.App (dsPos pos) f a)
             lam v b = Free (Raw.Lambda (dsPos pos) v b)
@@ -252,9 +239,9 @@ desugar = resolvePrimitives . futu coalg
             primComp  = Free (Raw.Prim (dsPos pos) (inject' Raw.KComp))
             wrap_ x rest_ = primKappa `app` lam x rest_
             compose x rest_ = (primComp `app` x) `app` rest_
-            body = case stmts of
-                     [] -> Free (Raw.Prim (dsPos pos) (inject' (Raw.KPrim Raw.EId)))
-                     (_ : _) -> foldr1 compose (map Pure stmts)
+            body = foldr compose
+              (Free (Raw.Prim (dsPos pos) (inject' (Raw.KPrim Raw.EId))))
+              (map Pure stmts)
         in unFree $
              foldr wrap_ body xs
 
@@ -274,7 +261,6 @@ desugar = resolvePrimitives . futu coalg
                primRaise
                handlers
 
-
 primitives :: forall p proxy.
   ( Raw.BasePrim :<< p
   , Raw.IOPrim :<< p
@@ -286,19 +272,29 @@ primitives _ = M.fromList
   [ (Variable "+",           (0, inject' Raw.Add))
   , (Variable "readnum",     (0, inject' Raw.ReadDouble))
   , (Variable "shownum",     (0, inject' Raw.ShowDouble))
+
+    -- IO
   , (Variable "readln",      (0, inject' Raw.ReadLn))
   , (Variable "writeln",     (0, inject' Raw.WriteLn))
+
+    -- Lists
   , (Variable "cons",        (0, inject' Raw.ListCons))
+
+    -- Link
+  , (Variable "link",        (0, inject' Raw.Link))
+
+    -- Exception
+  , (Variable "raise",       (0, inject' Raw.RaiseExc))
+
+    -- Kappa
   , (Variable "^const",      (0, inject' Raw.KConst))
   , (Variable "^vector",     (0, inject' Raw.KVec))
   , (Variable "^add",        (0, inject' (Raw.KPrim Raw.EAdd)))
   , (Variable "^mul",        (0, inject' (Raw.KPrim Raw.EMul)))
   , (Variable "^sub",        (0, inject' (Raw.KPrim Raw.ESub)))
   , (Variable "^div",        (0, inject' (Raw.KPrim Raw.EDiv)))
-  , (Variable "^loop",       (0, inject' Raw.KLoop))
   , (Variable "^fold",       (0, inject' (Raw.KPrim1 Raw.EFold)))
-  , (Variable "link",        (0, inject' Raw.Link))
-  , (Variable "raise",       (0, inject' Raw.RaiseExc))
+  , (Variable "^loop",       (0, inject' (Raw.KPrim1 Raw.ELoop)))
   ]
 
 resolvePrimitives ::
@@ -355,7 +351,7 @@ varGrammar =
   where
     parseVar :: Text -> Either Mismatch Variable
     parseVar t
-      | t `elem` ["lambda","let","if","case","catch","do","loop","kappa","=","<-","**","tt","ff"] = Left (unexpected t)
+      | t `elem` ["lambda","let","if","case","catch","do","kappa","=","<-","**","tt","ff"] = Left (unexpected t)
       | Just (h, _) <- uncons t, h == ':' || isUpper h = Left (unexpected t)
       | otherwise = Right (Variable t)
 
@@ -587,18 +583,6 @@ sugaredGrammar = fixG $ match
                    rest seqStmtGrammar >>>
                    onTail cons) >>>
              doblock)
-
-  -- $ With (\loop ->
-  --            annotated "loop" $
-  --            position >>>
-  --            swap >>>
-  --            list (
-  --              el (sym "loop") >>>
-  --              el (list (
-  --                    el varGrammar >>>
-  --                    rest varGrammar)) >>>
-  --              el sugaredGrammar) >>>
-  --            loop)
 
     $ With (\kappa ->
              annotated "kappa expression" $

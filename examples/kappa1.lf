@@ -1,3 +1,6 @@
+;; Calculate the mean of an array:
+;; sum xs / length xs
+
 (let
   ([length                    ;; host language let binding
      (kappa (xs)              ;; capture an input vector

@@ -52,7 +52,6 @@ data KappaPrim
   | KComp
   | KPrim EPrim
   | KPrim1 EPrim1
-  | KLoop
   | KKappa
 
 data KappaValue e
@@ -74,7 +73,6 @@ instance PrettyPrim (Const KappaPrim) where
     Const KVec       -> "κ/vec"
     Const (KPrim p)  -> "κ/" <> angles (pretty (show p))
     Const (KPrim1 p) -> "κ/" <> angles (pretty (show p))
-    Const KLoop      -> "κ/loop"
     Const KKappa     -> "κ/abs"
     Const KComp      -> "κ/·"
 
@@ -128,12 +126,6 @@ instance
               Just body' -> pure $ mkVKappa (EKappa var body')
               _ -> evalError "Lambda returned not a kappa!"
           _ -> evalError "Value is not a lambda!"
-
-    Const KLoop ->
-      pure $ mkVLam @m $ \f ->
-        case projKappa f of
-          Just f' -> pure $ mkVKappa (ELoop f')
-          _ -> evalError "Not a kappa-calculus program"
 
 instance TypePrim (Const KappaPrim) where
   typePrim = \case
@@ -202,6 +194,14 @@ instance TypePrim (Const KappaPrim) where
         (Fix (TKappa (a #: t) t), e) ~>
         Fix (TKappa (typeVectorOf a #: t) t)
 
+    Const (KPrim1 ELoop) ->
+      forall EStar $ \a ->
+      forall EStack $ \t ->
+      forall EStack $ \t' ->
+      effect $ \e ->
+      mono $
+       (Fix (TKappa (Fix (TSCons a t)) (Fix (TSCons a t'))), e) ~> Fix (TKappa t t')
+
     Const KKappa ->
       forall EStar $ \a ->
       forall EStack $ \t ->
@@ -212,14 +212,6 @@ instance TypePrim (Const KappaPrim) where
                     t'' = Fix (TRef v)
                 in (Fix (TForall v (Fix (TKappa t'' (Fix (TSCons a t''))))), e) ~> Fix (TKappa t t')
         in (f, e) ~> Fix (TKappa (Fix (TSCons a t)) t')
-
-    Const KLoop ->
-      forall EStar $ \a ->
-      forall EStack $ \t ->
-      forall EStack $ \t' ->
-      effect $ \e ->
-      mono $
-       (Fix (TKappa (Fix (TSCons a t)) (Fix (TSCons a t'))), e) ~> Fix (TKappa t t')
 
 ----------------------------------------------------------------------
 
@@ -235,6 +227,7 @@ data EPrim
 
 data EPrim1
   = EFold
+  | ELoop
   deriving (Show)
 
 newtype EVar = EVar Int
@@ -244,7 +237,6 @@ data EExpr
   = ERef   EVar
   | EComp  EExpr EExpr
   | EKappa EVar EExpr
-  | ELoop  EExpr
   | EPrim  EPrim
   | EPrim1 EPrim1 EExpr
     deriving (Show)
