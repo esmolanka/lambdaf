@@ -49,6 +49,29 @@
      (,(rx symbol-start (eval `(or ,@lf-keyword-keywords)) symbol-end) .
       (0 font-lock-keyword-face))))
 
+(defun lf-load-file ()
+  (interactive)
+  (let ((output-buffer (get-buffer-create "*LF Output*"))
+        (beginning (if (use-region-p) (region-beginning) (point-min)))
+        (end (if (use-region-p) (region-end) (point-max))))
+    (progn
+      (with-current-buffer output-buffer
+        (erase-buffer))
+      (call-process-region
+       beginning
+       end
+       flycheck-lf-executable
+       nil
+       output-buffer
+       t)
+      (display-buffer output-buffer))))
+
+(defvar lf-mode-map
+  (let ((map (make-keymap)))
+    (define-key map (kbd "C-c C-l") 'lf-load-file)
+    map)
+  "Keymap for LF major mode")
+
 ;;;###autoload
 (define-derived-mode lf-mode prog-mode "LF"
   "Major mode for Lf"
