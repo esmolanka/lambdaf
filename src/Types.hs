@@ -26,10 +26,12 @@ module Types
   , forall
   , mono
   , (~>)
-  , (#:)
   , (@:)
+  , (#:)
   , typeListOf
+  , typePairOf
   , typeVectorOf
+  , typeExprOf
   ) where
 
 import Control.Monad
@@ -80,17 +82,25 @@ data EType
 
 type Type = Fix TypeF
 data TypeF e
+  ----------------------------------------------------------------------
+  -- Base language
   = TRef    TVar           -- κ
   | TMeta   MetaVar        -- κ
-  | TCtor   Text
   | TApp    e e
   | TArrow  e e            -- STAR -> ROW -> STAR -> STAR
   | TForall TVar e         -- κ
   | TExists TVar e         -- κ
 
+  ----------------------------------------------------------------------
+  -- Base types
   | T BaseType             -- STAR
-  | TPair e e              -- STAR -> STAR
 
+  ----------------------------------------------------------------------
+  -- User-defined types
+  | TCtor   Text
+
+  ----------------------------------------------------------------------
+  -- Row typed records and variants
   | TRecord e              -- ROW -> STAR
   | TVariant e             -- ROW -> STAR
 
@@ -100,11 +110,12 @@ data TypeF e
   | TRowEmpty              -- ROW
   | TRowExtend Label e e e -- PRESENCE -> STAR -> ROW -> ROW
 
-  | TE EType               -- ESTAR
-
+  ----------------------------------------------------------------------
+  -- Embedded language types
   | TSNil                  -- ESTACK
   | TSCons e e             -- ESTAR -> ESTACK -> ESTACK
-  | TKappa e e             -- ESTACK -> ESTACK -> STAR
+  | TEArrow e e            -- ESTACK -> ESTAR -> STAR
+
   deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic1)
 
 instance Eq1 TypeF where
@@ -167,10 +178,16 @@ infixr 5 #:
 
 (@:) :: Type -> Type -> Type
 (@:) f a = Fix (TApp f a)
-infixr 7 @:
+infixl 7 @:
 
 typeVectorOf :: Type -> Type
-typeVectorOf a = (Fix (TCtor "Vec") @: a)
+typeVectorOf a = (Fix (TCtor "EVec") @: a)
+
+typePairOf :: Type -> Type -> Type
+typePairOf a b = Fix (TCtor "EPair") @: a @: b
 
 typeListOf :: Type -> Type
 typeListOf a = (Fix (TCtor "List") @: a)
+
+typeExprOf :: Type -> Type
+typeExprOf r = Fix (TEArrow (Fix TSNil) r)

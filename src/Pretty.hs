@@ -70,11 +70,11 @@ ppType :: Type -> Doc ann
 ppType = (group .) . para $ \case
   T c -> ppBaseType c
 
-  TE c -> ppEType c
-
   TSNil -> "ε"
   TSCons (_,h) (_,t) -> h <+> "::" <+> t
-  TKappa (_,a) (_,b) -> "⟨" <> a <+> "=>" <+> b <> "⟩"
+
+  TEArrow (Fix TSNil,_) (_,b) -> "⟨" <> b <> "⟩"
+  TEArrow (_,a) (_,b) -> "⟨" <> a <+> "⇒" <+> b <> "⟩"
 
   TCtor name -> pretty name
   TApp (_,a) (_,b) -> a <+> b
@@ -87,7 +87,6 @@ ppType = (group .) . para $ \case
       Fix (TArrow{}) -> parens f <+> "→" <+> a
       _other         -> f <+>  "→" <+> a
 
-  TPair (_,a) (_,b) -> parens (a <+> "**" <+> b)
   TRecord (_,row)   -> group $ braces $ space <> align (row <> space)
   TVariant (_,row)  -> group $ angles $ space <> align (row <> space)
   TPresent -> "▪︎"

@@ -40,7 +40,7 @@ import qualified Prim.IO as Raw (IOPrim(..))
 import qualified Prim.Link.Types as Raw (LinkPrim(..))
 import qualified Prim.Record as Raw (RecordPrim(..))
 import qualified Prim.Variant as Raw (VariantPrim(..))
-import qualified Prim.Kappa as Raw (KappaPrim(..), EPrim(..), EPrim1(..))
+import qualified Prim.Kappa as Raw (KappaPrim(..), EPrim(..))
 import qualified Syntax.Position as Raw
 import Types
 import Utils
@@ -83,7 +83,7 @@ data SugaredF e
   | Delay   Position e
   | Force   Position e
   | DoBlock Position [SeqBinding e]
-  | Kappa   Position [Variable] [e]
+  | Kappa   Position [Variable] e
   | Catch   Position e [VariantMatchLeg e]
     deriving (Generic)
 
@@ -232,18 +232,13 @@ desugar = resolvePrimitives . futu coalg
                       OrdinarySeqBinding x e -> mkSeq pos x e (Free (Raw.Ref (dsPos pos) x)))
                   (init stmts)
 
-      Fix (Kappa pos xs stmts) ->
+      Fix (Kappa pos xs body) ->
         let app f a = Free (Raw.App (dsPos pos) f a)
             lam v b = Free (Raw.Lambda (dsPos pos) v b)
-            primKappa = Free (Raw.Prim (dsPos pos) (inject' Raw.KKappa))
-            primComp  = Free (Raw.Prim (dsPos pos) (inject' Raw.KComp))
+            primKappa = Free (Raw.Prim (dsPos pos) (inject' Raw.KAbs))
             wrap_ x rest_ = primKappa `app` lam x rest_
-            compose x rest_ = (primComp `app` x) `app` rest_
-            body = foldr compose
-              (Free (Raw.Prim (dsPos pos) (inject' (Raw.KPrim Raw.EId))))
-              (map Pure stmts)
         in unFree $
-             foldr wrap_ body xs
+             foldr wrap_ (Pure body) xs
 
       Fix (Catch pos cont handlers) ->
         let primDecomp lbl = Free (Raw.Prim (dsPos pos) (inject' (Raw.VariantDecomp lbl)))
@@ -287,14 +282,15 @@ primitives _ = M.fromList
   , (Variable "raise",       (0, inject' Raw.RaiseExc))
 
     -- Kappa
-  , (Variable "^const",      (0, inject' Raw.KConst))
-  , (Variable "^vector",     (0, inject' Raw.KVec))
+  , (Variable "^dbl",        (0, inject' Raw.KConstDbl))
+  , (Variable "^vec",        (0, inject' Raw.KConstVec))
   , (Variable "^add",        (0, inject' (Raw.KPrim Raw.EAdd)))
   , (Variable "^mul",        (0, inject' (Raw.KPrim Raw.EMul)))
   , (Variable "^sub",        (0, inject' (Raw.KPrim Raw.ESub)))
   , (Variable "^div",        (0, inject' (Raw.KPrim Raw.EDiv)))
-  , (Variable "^fold",       (0, inject' (Raw.KPrim1 Raw.EFold)))
-  , (Variable "^loop",       (0, inject' (Raw.KPrim1 Raw.ELoop)))
+  , (Variable "^fold",       (0, inject' (Raw.KPrim Raw.EFold)))
+  , (Variable "^loop",       (0, inject' (Raw.KPrim Raw.ELoop)))
+  , (Variable "^fun",        (0, inject' (Raw.KAbs)))
   ]
 
 resolvePrimitives ::
@@ -591,7 +587,7 @@ sugaredGrammar = fixG $ match
              list (
                el (sym "kappa") >>>
                el (list (rest varGrammar)) >>>
-               rest sugaredGrammar) >>>
+               el sugaredGrammar) >>>
              kappa)
 
     $ With (\catch_ ->

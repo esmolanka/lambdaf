@@ -17,10 +17,11 @@ module Prim.Kappa
   , runKappa
   , KappaPrim(..)
   , EPrim(..)
-  , EPrim1(..)
   , KappaValue(..)
-  , mkVKappa
-  , projKappa
+  , mkVExpr
+  , mkVAbs
+  , projExpr
+  , projAbs
   ) where
 
 import Prelude hiding ((**))
@@ -30,6 +31,7 @@ import Control.Effect.State
 
 import Data.Functor.Const
 import Data.Functor.Foldable (Fix (..), unfix)
+import qualified Data.Set as S
 import Data.Sum
 import Data.Text.Prettyprint.Doc as PP
 
@@ -47,34 +49,42 @@ runKappa :: (Monad m) => KappaEffectC m a -> m a
 runKappa = evalState (EVar 100)
 
 data KappaPrim
-  = KConst
-  | KVec
-  | KComp
+  = KConstDbl
+  | KConstVec
   | KPrim EPrim
-  | KPrim1 EPrim1
-  | KKappa
+  | KAbs
 
 data KappaValue e
-  = VKappa EExpr
+  = VExpr EExpr
+  | VAbs  EAbs
 
-mkVKappa :: (KappaValue :< v) => EExpr -> Value v
-mkVKappa = Fix . inject . VKappa
+mkVExpr :: (KappaValue :< v) => EExpr -> Value v
+mkVExpr = Fix . inject . VExpr
 
-projKappa :: (KappaValue :< v) => Value v -> Maybe EExpr
-projKappa = fmap (\(VKappa e) -> e) . project @KappaValue . unfix
+mkVAbs :: (KappaValue :< v) => [EVar] -> EExpr -> Value v
+mkVAbs = ((Fix . inject . VAbs) .) . EAbs
+
+projExpr :: (KappaValue :< v) => Value v -> Maybe EExpr
+projExpr v = case project @KappaValue (unfix v) of
+  Just (VExpr e) -> Just e
+  _ -> Nothing
+
+projAbs :: (KappaValue :< v) => Value v -> Maybe EAbs
+projAbs v = case project @KappaValue (unfix v) of
+  Just (VAbs f) -> Just f
+  _ -> Nothing
 
 instance Pretty1 KappaValue where
   liftPretty _pp = \case
-    VKappa e -> pretty (show e)
+    VExpr e -> ppEExpr e
+    VAbs f  -> ppEAbs f
 
 instance PrettyPrim (Const KappaPrim) where
   prettyPrim = \case
-    Const KConst     -> "κ/lift"
-    Const KVec       -> "κ/vec"
-    Const (KPrim p)  -> "κ/" <> angles (pretty (show p))
-    Const (KPrim1 p) -> "κ/" <> angles (pretty (show p))
-    Const KKappa     -> "κ/abs"
-    Const KComp      -> "κ/·"
+    Const KConstDbl  -> "κ/▴"
+    Const KConstVec  -> "κ/▴ⁿ"
+    Const (KPrim p)  -> "κ/" <> pretty (show p)
+    Const KAbs       -> "κ"
 
 instance
   ( Member (RuntimeErrorEffect) sig
@@ -85,151 +95,204 @@ instance
   , KappaValue :< v
   ) => EvalPrim m v (Const KappaPrim) where
   evalPrim = \case
-    Const KConst ->
+    Const KConstDbl ->
       pure $ mkVLam @m $ \x ->
         case projBase x of
-          Just (VDbl x') -> pure $ mkVKappa (EPrim (ELit x'))
+          Just (VDbl x') -> pure $ mkVExpr (EReturn (ELit x'))
           _ -> evalError "Value is not a double!"
 
-    Const KVec ->
+    Const KConstVec ->
       pure $ mkVLam @m $ \xs ->
         case projBase xs of
           Just (VList xs') -> do
             xs'' <- traverse (\x -> case projBase x of {Just (VDbl x') -> pure x'; _ -> evalError "Value is not a double!" }) xs'
-            pure $ mkVKappa (EPrim (EVec xs''))
+            pure $ mkVExpr (EReturn (EVec xs''))
           _ -> evalError "Value is not a list of doubles!"
 
-    Const (KPrim p) ->
-      pure $ mkVKappa (EPrim p)
-
-    Const (KPrim1 p) ->
+    Const (KPrim EFold) ->
       pure $ mkVLam @m $ \f ->
-      case projKappa f of
-        Just f' -> pure $ mkVKappa (EPrim1 p f')
-        _ -> evalError "Argument is not a kappa!"
+      pure $ mkVLam @m $ \x ->
+      pure $ mkVLam @m $ \y ->
+        case (projAbs f, projExpr x, projExpr y) of
+          (Just f', Just x', Just y') -> mkVExpr <$> eapply1 EFold f' [x', y']
+          _ -> evalError "Wrong argument"
 
-    Const KComp ->
+    Const (KPrim ELoop) ->
       pure $ mkVLam @m $ \f ->
-      pure $ mkVLam @m $ \g ->
-        case (projKappa f, projKappa g) of
-          (Just f', Just g') -> pure $ mkVKappa (EComp f' g')
-          _ -> evalError "Argument is not a kappa!"
+        case projAbs f of
+          Just f' -> do
+            x <- fresh
+            pure $ mkVExpr (ELet x ELoop [f'] [] (EReturn (ERef x)))
+          _ -> evalError "Wrong argument"
 
-    Const KKappa ->
+    Const (KPrim prim) ->
+      pure $ mkVLam @m $ \x ->
+      pure $ mkVLam @m $ \y ->
+        case (projExpr x, projExpr y) of
+          (Just x', Just y') -> mkVExpr <$> eapply prim [x', y']
+          _ -> evalError "Wrong argument"
+
+    Const KAbs ->
       pure $ mkVLam @m $ \f ->
         case projLambda f of
           Just f' -> do
             var <- get
             modify (\(EVar n) -> EVar (n + 1))
-            body <- f' (mkVKappa (ERef var))
-            case projKappa body of
-              Just body' -> pure $ mkVKappa (EKappa var body')
+            body <- f' (mkVExpr (EReturn (ERef var)))
+            case (projExpr body, projAbs body) of
+              (Just body', _) -> pure $ mkVAbs [var] body'
+              (_, Just (EAbs vars body')) -> pure $ mkVAbs (var : vars) body'
               _ -> evalError "Lambda returned not a kappa!"
           _ -> evalError "Value is not a lambda!"
 
 instance TypePrim (Const KappaPrim) where
   typePrim = \case
-    Const KConst ->
-      forall EStack $ \t ->
+    Const KConstDbl ->
       mono $
-        Fix (T TDouble) ~> Fix (TKappa t (Fix (TSCons (Fix (TE TEDouble)) t)))
+        Fix (T TDouble) ~>
+        typeExprOf (Fix (TCtor "EDouble"))
 
-    Const KVec ->
-      forall EStack $ \t ->
+    Const KConstVec ->
       mono $
         typeListOf (Fix (T TDouble)) ~>
-        Fix (TKappa t (typeVectorOf (Fix (TE TEDouble)) #: t))
-
-    Const KComp ->
-      forall EStack $ \a ->
-      forall EStack $ \b ->
-      forall EStack $ \c ->
-      mono $
-        Fix (TKappa a b) ~> Fix (TKappa b c) ~> Fix (TKappa a c)
-
-    Const (KPrim EId) ->
-      forall EStack $ \t ->
-      mono $
-        Fix (TKappa t t)
-
-    Const (KPrim (ELit _)) ->
-      forall EStack $ \t ->
-      mono $
-        Fix (TKappa t (Fix (TE TEDouble) #: t))
-
-    Const (KPrim (EVec _)) ->
-      forall EStack $ \t ->
-      mono $
-        Fix (TKappa t (typeVectorOf (Fix (TE TEDouble)) #: t))
+        typeExprOf (typeVectorOf (Fix (TCtor "EDouble")))
 
     Const (KPrim EAdd) ->
-      forall EStack $ \t ->
       mono $
-        Fix (TKappa (Fix (TE TEDouble) #: Fix (TE TEDouble) #: t) (Fix (TE TEDouble) #: t))
+        typeExprOf (Fix (TCtor "EDouble")) ~>
+        typeExprOf (Fix (TCtor "EDouble")) ~>
+        typeExprOf (Fix (TCtor "EDouble"))
 
     Const (KPrim EMul) ->
-      forall EStack $ \t ->
       mono $
-        Fix (TKappa (Fix (TE TEDouble) #: Fix (TE TEDouble) #: t) (Fix (TE TEDouble) #: t))
+        typeExprOf (Fix (TCtor "EDouble")) ~>
+        typeExprOf (Fix (TCtor "EDouble")) ~>
+        typeExprOf (Fix (TCtor "EDouble"))
 
     Const (KPrim ESub) ->
-      forall EStack $ \t ->
       mono $
-        Fix (TKappa (Fix (TE TEDouble) #: Fix (TE TEDouble) #: t) (Fix (TE TEDouble) #: t))
+        typeExprOf (Fix (TCtor "EDouble")) ~>
+        typeExprOf (Fix (TCtor "EDouble")) ~>
+        typeExprOf (Fix (TCtor "EDouble"))
 
     Const (KPrim EDiv) ->
-      forall EStack $ \t ->
       mono $
-        Fix (TKappa (Fix (TE TEDouble) #: Fix (TE TEDouble) #: t) (Fix (TE TEDouble) #: t))
+        typeExprOf (Fix (TCtor "EDouble")) ~>
+        typeExprOf (Fix (TCtor "EDouble")) ~>
+        typeExprOf (Fix (TCtor "EDouble"))
 
-    Const (KPrim1 EFold) ->
+    Const (KPrim EFold) ->
       forall EStar $ \a ->
-      forall EStack $ \t ->
+      forall EStar $ \b ->
       mono $
-        Fix (TKappa (a #: t) t) ~>
-        Fix (TKappa (typeVectorOf a #: t) t)
+        Fix (TEArrow (a #: b #: Fix TSNil) b) ~>
+        typeExprOf b ~>
+        typeExprOf (typeVectorOf a) ~>
+        typeExprOf b
 
-    Const (KPrim1 ELoop) ->
-      forall EStar $ \a ->
-      forall EStack $ \t ->
-      forall EStack $ \t' ->
+    Const (KPrim ELoop) ->
+      forall EStar $ \b ->
       mono $
-       Fix (TKappa (Fix (TSCons a t)) (Fix (TSCons a t'))) ~> Fix (TKappa t t')
+        Fix (TForall (TVar 100 EStar)
+              (Fix (TEArrow (Fix (TRef (TVar 100 EStar)) #: b #: Fix TSNil) (typePairOf (Fix (TRef (TVar 100 EStar))) b)))) ~>
+        Fix (TEArrow (b #: Fix TSNil) b)
 
-    Const KKappa ->
+    Const KAbs ->
       forall EStar $ \a ->
+      forall EStar $ \b ->
       forall EStack $ \t ->
-      forall EStack $ \t' ->
       mono $
-        let f = let v = TVar 10 EStack
-                    t'' = Fix (TRef v)
-                in Fix (TForall v (Fix (TKappa t'' (Fix (TSCons a t''))))) ~> Fix (TKappa t t')
-        in f ~> Fix (TKappa (Fix (TSCons a t)) t')
+        (Fix (TEArrow (Fix TSNil) a) ~> Fix (TEArrow t b)) ~> Fix (TEArrow (a #: t) b)
 
 ----------------------------------------------------------------------
 
 data EPrim
-  = EId
-  | ELit Double
-  | EVec [Double]
-  | EAdd
+  = EAdd
   | EMul
   | ESub
   | EDiv
-  deriving (Show)
-
-data EPrim1
-  = EFold
+  | EFold
   | ELoop
-  deriving (Show)
+  deriving (Show, Eq, Ord)
 
 newtype EVar = EVar Int
-  deriving (Show)
+  deriving (Show, Ord, Eq)
 
 data EExpr
-  = ERef   EVar
-  | EComp  EExpr EExpr
-  | EKappa EVar EExpr
-  | EPrim  EPrim
-  | EPrim1 EPrim1 EExpr
-    deriving (Show)
+ = EReturn EValue
+ | ELet EVar EPrim [EAbs] [EValue] EExpr
+   deriving (Show)
+
+data EAbs = EAbs [EVar] EExpr
+   deriving (Show)
+
+data EValue
+ = ERef EVar
+ | EUnit
+ | ELit Double
+ | EVec [Double]
+   deriving (Show)
+
+fresh :: (Member (State EVar) sig, Carrier sig m) => m EVar
+fresh = do
+ x <- get
+ modify (\(EVar n) -> EVar (succ n))
+ return x
+
+chain :: [EExpr] -> ([EValue] -> EExpr) -> EExpr
+chain arguments fun =
+  foldr
+    (\expr rest vs acc -> with acc expr (\acc' v -> rest (v : vs) acc'))
+    (\vs _ -> fun (reverse vs))
+    arguments [] mempty
+  where
+    with :: S.Set EVar -> EExpr -> (S.Set EVar -> EValue -> EExpr) -> EExpr
+    with used0 expr0 k = go used0 expr0
+      where
+        go :: S.Set EVar -> EExpr -> EExpr
+        go used = \case
+          ELet ref prim fs args rest
+            | S.member ref used -> go used rest
+            | otherwise -> ELet ref prim fs args (go (S.insert ref used) rest)
+          EReturn val ->
+            k used val
+
+eapply1 :: (Member (State EVar) sig, Carrier sig m) => EPrim -> EAbs -> [EExpr] -> m EExpr
+eapply1 newprim fun args = do
+  x <- fresh
+  pure $ chain args $ \vals ->
+    ELet x newprim [fun] vals (EReturn (ERef x))
+
+eapply :: (Member (State EVar) sig, Carrier sig m) => EPrim -> [EExpr] -> m EExpr
+eapply newprim args = do
+  x <- fresh
+  pure $ chain args $ \vals ->
+    ELet x newprim [] vals (EReturn (ERef x))
+
+ppEVar :: EVar -> Doc ann
+ppEVar (EVar n) = "@" <> pretty n
+
+ppEValue :: EValue -> Doc ann
+ppEValue = \case
+ ERef ref -> ppEVar ref
+ EUnit    -> "Unit"
+ ELit dbl -> pretty dbl
+ EVec vec -> pretty vec
+
+ppEPrim :: EPrim -> Doc ann
+ppEPrim = pretty . show
+
+ppEAbs :: EAbs -> Doc ann
+ppEAbs (EAbs vars body) =
+  vsep [ hsep ("κ" : punctuate comma (map ppEVar vars)) <> "."
+       , indent 2 $ ppEExpr body
+       ]
+
+ppEExpr :: EExpr -> Doc ann
+ppEExpr = \case
+ ELet ref prim fs args rest -> vsep $
+   [ "LET" <+> ppEVar ref <+> "=" <+> ppEPrim prim <+> tupled (map ppEValue args) ] ++
+   map (\fun -> indent 2 $ nest 6 $ "WITH" <+> ppEAbs fun) fs ++
+   [ ppEExpr rest ]
+ EReturn val ->
+   "RETURN" <+> ppEValue val

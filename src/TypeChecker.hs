@@ -277,17 +277,12 @@ freshMeta k = do
     a ≤· TMeta ma | not (ma `freeMetaIn` Fix a) = instantiate Flex  ma (Fix a)
 
     T a  ≤· T b  | a == b = pure ()
-    TE a ≤· TE b | a == b = pure ()
-
-    TPair a b ≤· TPair a' b' = do
-      a ≤ a'
-      getCtx >>= \ctx -> applySolutions ctx b ≤ applySolutions ctx b'
 
     TSNil ≤· TSNil = pure ()
     TSCons h t ≤· TSCons h' t' = do
       h ≤ h'
       getCtx >>= \ctx -> applySolutions ctx t ≤ applySolutions ctx t'
-    TKappa a b ≤· TKappa a' b' = do
+    TEArrow a b ≤· TEArrow a' b' = do
       a' ≤ a -- contravariant
       getCtx >>= \ctx -> applySolutions ctx b ≤ applySolutions ctx b'
 
@@ -383,10 +378,10 @@ instantiate dir0 ma0 t0 = inst dir0 ma0 t0
           getCtx >>= \ctx' -> inst dir ma2 (applySolutions ctx' b)
 
         -- Inst*Kappa
-        go ctx | Just (l, r) <- ctxHole (CtxMeta ma) ctx, Fix (TKappa a b) <- t = do
+        go ctx | Just (l, r) <- ctxHole (CtxMeta ma) ctx, Fix (TEArrow a b) <- t = do
           ma1 <- freshMeta EStack
-          ma2 <- freshMeta EStack
-          putCtx $ l ▸ CtxMeta ma2 ▸ CtxMeta ma1 ▸ CtxSolved ma (Fix (TKappa (Fix (TMeta ma1)) (Fix (TMeta ma2)))) <> r
+          ma2 <- freshMeta EStar
+          putCtx $ l ▸ CtxMeta ma2 ▸ CtxMeta ma1 ▸ CtxSolved ma (Fix (TEArrow (Fix (TMeta ma1)) (Fix (TMeta ma2)))) <> r
           inst (opposite dir) ma1 a
           getCtx >>= \ctx' -> inst dir ma2 (applySolutions ctx' b)
 
@@ -538,8 +533,11 @@ inferKind :: forall m sig. (TypeChecking sig, Carrier sig m) => Position -> Type
 inferKind pos = cata (alg <=< sequence)
   where
     kinds =
-      [ ("Vec", EStar `Arr` EStar)
-      , ("List", Star `Arr` Star)
+      [ ("List", Star `Arr` Star)
+      , ("Pair", Star `Arr` (Star `Arr` Star))
+      , ("EVec", EStar `Arr` EStar)
+      , ("EPair", EStar `Arr` (EStar `Arr` EStar))
+      , ("EDouble", EStar)
       ]
 
     alg :: TypeF Kind -> m Kind
@@ -550,17 +548,15 @@ inferKind pos = cata (alg <=< sequence)
       TExists _ k          -> return k
 
       T _                  -> return Star
-      TE _                 -> return EStar
 
       TCtor n | Just k <- lookup n kinds -> return k
       TApp (Arr a b) c | a == c -> return b
 
       TSNil                -> return EStack
       TSCons EStar EStack  -> return EStack
-      TKappa EStack EStack -> return Star
+      TEArrow EStack EStar -> return Star
 
       TArrow Star Star     -> return Star
-      TPair Star Star      -> return Star
       TRecord Row          -> return Star
       TVariant Row         -> return Star
       TPresent             -> return Presence
