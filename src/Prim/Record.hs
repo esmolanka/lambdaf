@@ -101,22 +101,18 @@ instance TypePrim (Const RecordPrim) where
       forall Star $ \b ->
       forall Presence $ \p ->
       forall Row  $ \r ->
-      effect $ \e1 ->
-      effect $ \e2 ->
       mono $
-        (a, e1) ~>
-        (Fix $ TRecord $ Fix $ TRowExtend label p b r, e2) ~>
+        a ~>
+        (Fix $ TRecord $ Fix $ TRowExtend label p b r) ~>
         (Fix $ TRecord $ Fix $ TRowExtend label (Fix TPresent) a r)
     Const (RecordSelect label) ->
       forall Star $ \a ->
       forall Row  $ \r ->
-      effect $ \e ->
-      mono $ (Fix $ TRecord $ Fix $ TRowExtend label (Fix TPresent) a r, e) ~> a
+      mono $
+        (Fix $ TRecord $ Fix $ TRowExtend label (Fix TPresent) a r) ~> a
     Const (RecordDefault label) ->
       forall Star $ \a ->
       forall Presence $ \p ->
       forall Row  $ \r ->
-      effect $ \e1 ->
-      effect $ \e2 ->
       mono $
-      (a, e1) ~> (Fix $ TRecord $ Fix $ TRowExtend label p a r, e2) ~> a
+        a ~> (Fix $ TRecord $ Fix $ TRowExtend label p a r) ~> a

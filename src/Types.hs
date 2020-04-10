@@ -24,7 +24,6 @@ module Types
   , TyScheme
   , toType
   , forall
-  , effect
   , mono
   , (~>)
   , (#:)
@@ -136,7 +135,6 @@ toType :: TyScheme -> Type
 toType (TyScheme vars body) =
   foldr (\x rest -> Fix $ TForall x rest) body vars
 
-
 class TypePrim (p :: * -> *) where
   typePrim :: p Void -> TyScheme
 
@@ -155,16 +153,13 @@ forall k f =
       tv = TVar n k
   in  TyScheme (tv : bs) ty
 
-effect :: (Type -> TyScheme) -> TyScheme
-effect f = f (Fix TRowEmpty)
-
 mono :: Type -> TyScheme
 mono ty = TyScheme [] ty
 
 infixr 3 ~>
 
-(~>) :: (Type, Type) -> Type -> Type
-(a, _e) ~> b = Fix (TArrow a b)
+(~>) :: Type -> Type -> Type
+a ~> b = Fix (TArrow a b)
 
 (#:) :: Type -> Type -> Type
 (#:) a b = Fix (TSCons a b)

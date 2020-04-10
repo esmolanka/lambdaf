@@ -180,52 +180,33 @@ partialEff = Label (T.pack "partial")
 instance TypePrim (Const BasePrim) where
   typePrim = \case
     Const Add ->
-      effect $ \e1 ->
-      effect $ \e2 ->
       mono $
-        (Fix (T TDouble), e1) ~>
-        (Fix (T TDouble), e2) ~> Fix (T TDouble)
+        Fix (T TDouble) ~> Fix (T TDouble) ~> Fix (T TDouble)
     Const ReadDouble ->
-      effect $ \e1 ->
       mono $
-        (Fix (T TText), Fix (TRowExtend partialEff (Fix TPresent) (Fix (T TUnit)) e1)) ~>
-        (Fix (T TDouble))
+        Fix (T TText) ~> Fix (T TDouble)
     Const ShowDouble ->
-      effect $ \e1 ->
       mono $
-        (Fix (T TDouble), e1) ~>
-        (Fix (T TText))
+        Fix (T TDouble) ~> Fix (T TText)
     Const If ->
       forall Star $ \a ->
-      effect $ \e1 ->
-      effect $ \e2 ->
-      effect $ \e3 ->
       mono $
-        (Fix (T TDouble), e1) ~>
-        ((Fix (T TUnit), e3) ~> a, e2) ~>
-        ((Fix (T TUnit), e3) ~> a, e3) ~> a
+        Fix (T TDouble) ~> (Fix (T TUnit) ~> a) ~> (Fix (T TUnit) ~> a) ~> a
     Const Delay ->
       forall Star $ \a ->
-      effect $ \e1 ->
-      effect $ \e2 ->
       mono $
-        ((Fix (T TUnit), e1) ~> a, e2) ~>
-        ((Fix (T TUnit), e1) ~> a)
+        (Fix (T TUnit) ~> a) ~> (Fix (T TUnit) ~> a)
     Const ListNil ->
       forall Star $ \a ->
       mono $ typeListOf a
     Const ListCons ->
       forall Star $ \a ->
-      effect $ \e1 ->
-      effect $ \e2 ->
       mono $
-        (a, e1) ~> (typeListOf a, e2) ~> typeListOf a
+        a ~> typeListOf a ~> typeListOf a
     Const MkPair ->
       forall Star $ \a ->
       forall Star $ \b ->
-      effect $ \e1 ->
-      effect $ \e2 ->
-      mono $ (a, e1) ~> (b, e2) ~> Fix (TPair a b)
+      mono $ a ~> b ~> ((Fix (TCtor "Pair") @: a) @: b)
     Const (MkDouble _) ->
       mono $ Fix $ T $ TDouble
     Const (MkText _) ->

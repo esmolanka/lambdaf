@@ -84,9 +84,8 @@ instance TypePrim (Const VariantPrim) where
     Const (VariantInject label) ->
       forall Star $ \a ->
       forall Row  $ \r ->
-      effect $ \e ->
       mono $
-        (a, e) ~> Fix (TVariant (Fix (TRowExtend label (Fix TPresent) a r)))
+        a ~> Fix (TVariant (Fix (TRowExtend label (Fix TPresent) a r)))
 
     -- VariantDecomp<lbl> : (a -> b) -> (<r> -> b) -> <lbl? : a | r> -> b
     Const (VariantDecomp label) ->
@@ -94,16 +93,12 @@ instance TypePrim (Const VariantPrim) where
       forall Star $ \b ->
       forall Presence $ \p ->
       forall Row  $ \r ->
-      effect $ \e1 ->
-      effect $ \e2 ->
-      effect $ \e3 ->
       mono $
-        ((a, e3) ~> b, e1) ~>
-        ((Fix (TVariant r), e3) ~> b, e2) ~>
-        (Fix $ TVariant $ Fix $ TRowExtend label p a r, e3) ~> b
+        (a ~> b) ~>
+        (Fix (TVariant r) ~> b) ~>
+        (Fix $ TVariant $ Fix $ TRowExtend label p a r) ~> b
 
     Const VariantAbsurd ->
       forall Star $ \a ->
-      effect $ \e ->
       mono $
-        (Fix (TVariant (Fix TRowEmpty)), e) ~> a
+        Fix (TVariant (Fix TRowEmpty)) ~> a

@@ -78,9 +78,7 @@ instance TypePrim (Const LinkPrim) where
   typePrim = \case
     Const Link ->
       forall Star $ \a ->
-      effect $ \e1 ->
-      effect $ \e2 ->
       mono $
-        (Fix (T TText), Fix $ TRowExtend ioEff (Fix TPresent) (Fix (T TUnit)) e1) ~>
-        (Fix (T TUnit), e2) ~>
+        Fix (T TText) ~>
+        Fix (T TUnit) ~>
         a

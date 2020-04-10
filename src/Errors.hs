@@ -10,6 +10,7 @@ data TCError = TCError Position Reason
 data Reason
   = CannotUnify Type Type
   | CannotUnifyLabel Label Type Type
+  | CannotUnifyWithSkolem Type Type TVar
   | InfiniteType Type
   | RecursiveRowType Type
   | KindMismatch Kind Kind

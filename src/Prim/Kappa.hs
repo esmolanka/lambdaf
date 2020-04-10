@@ -131,25 +131,21 @@ instance TypePrim (Const KappaPrim) where
   typePrim = \case
     Const KConst ->
       forall EStack $ \t ->
-      effect $ \e1 ->
       mono $
-        (Fix (T TDouble), e1) ~> Fix (TKappa t (Fix (TSCons (Fix (TE TEDouble)) t)))
+        Fix (T TDouble) ~> Fix (TKappa t (Fix (TSCons (Fix (TE TEDouble)) t)))
 
     Const KVec ->
       forall EStack $ \t ->
-      effect $ \e1 ->
       mono $
-        (typeListOf (Fix (T TDouble)), e1) ~>
+        typeListOf (Fix (T TDouble)) ~>
         Fix (TKappa t (typeVectorOf (Fix (TE TEDouble)) #: t))
 
     Const KComp ->
       forall EStack $ \a ->
       forall EStack $ \b ->
       forall EStack $ \c ->
-      effect $ \e1 ->
-      effect $ \e2 ->
       mono $
-        (Fix (TKappa a b), e1) ~> (Fix (TKappa b c), e2) ~> Fix (TKappa a c)
+        Fix (TKappa a b) ~> Fix (TKappa b c) ~> Fix (TKappa a c)
 
     Const (KPrim EId) ->
       forall EStack $ \t ->
@@ -189,29 +185,26 @@ instance TypePrim (Const KappaPrim) where
     Const (KPrim1 EFold) ->
       forall EStar $ \a ->
       forall EStack $ \t ->
-      effect $ \e ->
       mono $
-        (Fix (TKappa (a #: t) t), e) ~>
+        Fix (TKappa (a #: t) t) ~>
         Fix (TKappa (typeVectorOf a #: t) t)
 
     Const (KPrim1 ELoop) ->
       forall EStar $ \a ->
       forall EStack $ \t ->
       forall EStack $ \t' ->
-      effect $ \e ->
       mono $
-       (Fix (TKappa (Fix (TSCons a t)) (Fix (TSCons a t'))), e) ~> Fix (TKappa t t')
+       Fix (TKappa (Fix (TSCons a t)) (Fix (TSCons a t'))) ~> Fix (TKappa t t')
 
     Const KKappa ->
       forall EStar $ \a ->
       forall EStack $ \t ->
       forall EStack $ \t' ->
-      effect $ \e ->
       mono $
         let f = let v = TVar 10 EStack
                     t'' = Fix (TRef v)
-                in (Fix (TForall v (Fix (TKappa t'' (Fix (TSCons a t''))))), e) ~> Fix (TKappa t t')
-        in (f, e) ~> Fix (TKappa (Fix (TSCons a t)) t')
+                in Fix (TForall v (Fix (TKappa t'' (Fix (TSCons a t''))))) ~> Fix (TKappa t t')
+        in f ~> Fix (TKappa (Fix (TSCons a t)) t')
 
 ----------------------------------------------------------------------
 

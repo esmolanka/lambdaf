@@ -15,12 +15,13 @@ import Control.Effect
 import Control.Effect.Carrier
 import Control.Effect.Error
 import Control.Effect.Reader
-import Control.Monad (unless)
+import Control.Monad (unless, forM_)
 import Control.Monad.IO.Class
 
 import qualified Data.ByteString.Lazy.Char8 as B8
 import Data.Text.Prettyprint.Doc
 import qualified Language.SexpGrammar
+import qualified Language.Sexp.Located
 
 import qualified Options.Applicative as Opt
 
@@ -69,7 +70,7 @@ runEval k = do
 eval' :: Expr PrimTypes -> IO (Either String (Value ValueTypes))
 eval' e = runEval (eval e)
 
-infer' :: Expr PrimTypes -> Either TCError (Type, Type)
+infer' :: Expr PrimTypes -> Either TCError Type
 infer' a = runInfer (inferExprType a)
 
 ----------------------------------------------------------------------
@@ -106,24 +107,30 @@ main = do
       Nothing -> (,) <$> pure "<stdin>" <*> B8.getContents
       Just fn -> (,) <$> pure fn <*> B8.readFile fn
 
-  expr <-
-    case Language.SexpGrammar.decodeWith sugaredGrammar fn str of
+  exprs <-
+    case Language.Sexp.Located.parseSexps fn str >>=
+         traverse (Language.SexpGrammar.fromSexp sugaredGrammar)
+    of
       Left err -> die $ "parse error:\n" ++ err
-      Right s -> pure (desugar s :: Expr PrimTypes)
+      Right s -> pure (map desugar s :: [Expr PrimTypes])
 
-  unless optTypecheck $ putStrLn $ render (ppExpr expr)
+  forM_ exprs $ \expr -> do
+    unless optTypecheck $
+      putStrLn $ render (ppExpr expr)
 
-  case infer' expr of
-    Left tcerror -> die (render (ppError tcerror))
-    Right (ty,effty) -> do
-      unless optTypecheck $ putStrLn $ render $ vsep
-        [ "----------------------------------------------------------------------"
-        , ":" <+> ppType ty
-        , "!" <+> ppType effty
-        , "----------------------------------------------------------------------"
-        ]
-      unless optTypecheck $ do
-        res <- eval' expr
-        case res of
-          Left err -> putStrLn err
-          Right p -> putStrLn (render (ppValue p))
+    case infer' expr of
+      Left tcerror ->
+        IO.hPutStrLn IO.stderr
+          (render (ppError tcerror))
+
+      Right ty -> do
+        unless optTypecheck $ putStrLn $ render $ vsep
+          [ "----------------------------------------------------------------------"
+          , ":" <+> ppType ty
+          , "----------------------------------------------------------------------"
+          ]
+        unless optTypecheck $ do
+          res <- eval' expr
+          case res of
+            Left err -> putStrLn err
+            Right p -> putStrLn (render (ppValue p))

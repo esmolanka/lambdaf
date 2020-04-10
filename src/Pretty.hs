@@ -118,12 +118,17 @@ ppError (TCError pos reason) =
 ppReason :: Reason -> Doc ann
 ppReason = \case
   CannotUnify t1 t2 -> vsep
-    [ "Cannot unify types."
+    [ "Cannot match expected type with actual type."
     , indent 2 $ "Actual:  " <+> nest 2 (ppType t1)
     , indent 2 $ "Expected:" <+> nest 2 (ppType t2)
     ]
   CannotUnifyLabel lbl t1 t2 -> vsep
-    [ "Cannot unify label" <+> pretty (show lbl) <+> "in types."
+    [ "Cannot match label" <+> pretty (show lbl) <+> "in types."
+    , indent 2 $ "Actual:  " <+> nest 2 (ppType t1)
+    , indent 2 $ "Expected:" <+> nest 2 (ppType t2)
+    ]
+  CannotUnifyWithSkolem t1 t2 tyvar -> vsep
+    [ "Cannot match expected type with actual type, because skolem" <+> ppTyVar tyvar <+> "would escape its scope."
     , indent 2 $ "Actual:  " <+> nest 2 (ppType t1)
     , indent 2 $ "Expected:" <+> nest 2 (ppType t2)
     ]
@@ -138,9 +143,9 @@ ppReason = \case
   KindMismatch k1 k2 -> vsep
     [ "Kind mismatch:" <+> pretty (show k1) <+> "vs." <+> pretty (show k2)
     ]
-  IllKindedType _ -> "Ill-kinded type"
+  IllKindedType t -> "Ill-kinded type:" <+> pretty (show t)
   VariableNotFound expr -> "Variable not found:" <+> pretty (show expr)
-  TypeVariableNotFound tyvar -> "Type variable not found:" <+> ppTyVar tyvar
+  TypeVariableNotFound tyvar -> "Type variable escaped its scope:" <+> ppTyVar tyvar
   ImpredicativePolymoprhism t -> "Impredicative polymorphism unsupported:" <+> ppType t
   OtherError msg -> pretty msg
 

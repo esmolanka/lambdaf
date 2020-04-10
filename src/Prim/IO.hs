@@ -68,12 +68,8 @@ ioEff = Label (T.pack "io")
 instance TypePrim (Const IOPrim) where
   typePrim = \case
     Const ReadLn ->
-      effect $ \e1 ->
       mono $
-        (Fix (T TUnit), Fix $ TRowExtend ioEff (Fix TPresent) (Fix (T TUnit)) e1) ~>
-        (Fix (T TText))
+        Fix (T TUnit) ~> Fix (T TText)
     Const WriteLn ->
-      effect $ \e1 ->
       mono $
-        (Fix (T TText), Fix $ TRowExtend ioEff (Fix TPresent) (Fix (T TUnit)) e1) ~>
-        (Fix (T TUnit))
+        Fix (T TText) ~> Fix (T TUnit)

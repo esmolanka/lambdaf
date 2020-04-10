@@ -70,26 +70,17 @@ instance ( Member (RuntimeErrorEffect) sig
       projLam :: (LambdaValue m :< v) => Value v -> Maybe (LambdaValue m (Value v))
       projLam = project @(LambdaValue m) . unfix
 
-exceptionEff :: Label
-exceptionEff = Label "exc"
-
 instance TypePrim (Const ExceptionPrim) where
   typePrim = \case
     Const CatchExc ->
       forall Star $ \a ->
       forall Star $ \b ->
-      forall Star $ \c ->
-      forall Presence $ \p ->
-      effect $ \e1 ->
-      effect $ \e2 ->
       mono $
-        ((Fix $ T TUnit, Fix $ TRowExtend exceptionEff (Fix TPresent) b e2) ~> a, e1) ~>
-        ((b, Fix (TRowExtend exceptionEff p c e2)) ~> a, Fix (TRowExtend exceptionEff p c e2)) ~>
+        (Fix (T TUnit) ~> a) ~>
+        (b ~> a) ~>
         a
     Const RaiseExc ->
       forall Star $ \a ->
       forall Star $ \b ->
-      effect $ \e ->
       mono $
-        (a, Fix $ TRowExtend exceptionEff (Fix TPresent) a e) ~>
-        b
+        a ~> b

@@ -126,10 +126,10 @@ ctxDrop :: CtxMember -> Ctx -> Ctx
 ctxDrop m (Ctx ctx) =
   Ctx $ Seq.dropWhileR (== m) $ Seq.dropWhileR (/= m) ctx
 
-ctxUnsolved :: Ctx -> ([TVar], Ctx)
+ctxUnsolved :: Ctx -> ([MetaVar], Ctx)
 ctxUnsolved (Ctx ctx) =
   ( flip mapMaybe (toList ctx) $ \case
-      CtxMeta (MetaVar n k) -> Just (TVar n k)
+      CtxMeta m@MetaVar{} -> Just m
       _ -> Nothing
   , Ctx $ flip fmap ctx $ \case
       CtxMeta v@(MetaVar n k) -> CtxSolved v (Fix (TRef (TVar n k)))
@@ -151,7 +151,7 @@ ctxUnsolved (Ctx ctx) =
             throwError $ TypeVariableNotFound v
         TMeta v ->
           unless (ctxHasMeta ctx v) $
-            throwError $ OtherError $ "unbound meta variable ‘" ++ show v ++ "’"
+            throwError $ OtherError $ "unscoped meta variable ‘" ++ show v ++ "’"
         TForall v b ->
           local (▸ CtxVar v) b
         TExists v b ->
@@ -353,80 +353,81 @@ opposite = \case
   Flex -> Rigid
   Rigid -> Flex
 
-instantiate :: (TypeChecking sig, Carrier sig m) => Direction -> MetaVar -> Type -> m ()
-instantiate dir ma t = getCtx >>= go
+instantiate :: forall sig m. (TypeChecking sig, Carrier sig m) => Direction -> MetaVar -> Type -> m ()
+instantiate dir0 ma0 t0 = inst dir0 ma0 t0
   where
-  -- Inst*Solve
-  go ctx | True <- isMono t, Just (l, r) <- ctxHole (CtxMeta ma) ctx, Right{} <- l ⊢ t =
-    putCtx $ l ▸ CtxSolved ma t <> r
+    inst :: (TypeChecking sig, Carrier sig m) => Direction -> MetaVar -> Type -> m ()
+    inst dir ma t = getCtx >>= go
+      where
+        -- Inst*Solve
+        go ctx | True <- isMono t, Just (l, r) <- ctxHole (CtxMeta ma) ctx, Right{} <- l ⊢ t =
+          putCtx $ l ▸ CtxSolved ma t <> r
 
-  -- Inst*Reach
-  go ctx | Fix (TMeta ma') <- t, Just (l, m, r) <- ctxHoles (CtxMeta ma) (CtxMeta ma') ctx =
-    putCtx $ l ▸ CtxMeta ma <> m ▸ CtxSolved ma' (Fix (TMeta ma)) <> r
+        -- Inst*Skolem
+        go ctx | Just (l, _) <- ctxHole (CtxMeta ma) ctx, Fix (TRef tv) <- t, Left{} <- l ⊢ t = do
+          ask @Position >>= \pos ->
+            throwError $ TCError pos $ case dir0 of
+              Rigid -> CannotUnifyWithSkolem (Fix (TMeta ma0)) t0 tv
+              Flex  -> CannotUnifyWithSkolem t0 (Fix (TMeta ma0)) tv
 
-  -- Inst*Arr
-  go ctx | Just (l, r) <- ctxHole (CtxMeta ma) ctx, Fix (TArrow a b) <- t = do
-    ma1 <- freshMeta Star
-    ma2 <- freshMeta Star
-    putCtx $ l ▸ CtxMeta ma2 ▸ CtxMeta ma2 ▸ CtxMeta ma1 ▸ CtxSolved ma (Fix (TArrow (Fix (TMeta ma1)) (Fix (TMeta ma2)))) <> r
-    instantiate (opposite dir) ma1 a
-    getCtx >>= \ctx' -> instantiate dir ma2 (applySolutions ctx' b)
+        -- Inst*Reach
+        go ctx | Fix (TMeta ma') <- t, Just (l, m, r) <- ctxHoles (CtxMeta ma) (CtxMeta ma') ctx =
+          putCtx $ l ▸ CtxMeta ma <> m ▸ CtxSolved ma' (Fix (TMeta ma)) <> r
 
-  -- Inst*Kappa
-  go ctx | Just (l, r) <- ctxHole (CtxMeta ma) ctx, Fix (TKappa a b) <- t = do
-    ma1 <- freshMeta EStack
-    ma2 <- freshMeta EStack
-    putCtx $ l ▸ CtxMeta ma2 ▸ CtxMeta ma2 ▸ CtxMeta ma1 ▸ CtxSolved ma (Fix (TKappa (Fix (TMeta ma1)) (Fix (TMeta ma2)))) <> r
-    instantiate (opposite dir) ma1 a
-    getCtx >>= \ctx' -> instantiate dir ma2 (applySolutions ctx' b)
+        -- Inst*Arr
+        go ctx | Just (l, r) <- ctxHole (CtxMeta ma) ctx, Fix (TArrow a b) <- t = do
+          ma1 <- freshMeta Star
+          ma2 <- freshMeta Star
+          putCtx $ l ▸ CtxMeta ma2 ▸ CtxMeta ma1 ▸ CtxSolved ma (Fix (TArrow (Fix (TMeta ma1)) (Fix (TMeta ma2)))) <> r
+          inst (opposite dir) ma1 a
+          getCtx >>= \ctx' -> inst dir ma2 (applySolutions ctx' b)
 
-  -- Inst*App
-  go ctx | Just (l, r) <- ctxHole (CtxMeta ma) ctx, Fix (TPair a b) <- t = do
-    ma1 <- freshMeta Star
-    ma2 <- freshMeta Star
-    putCtx $ l ▸ CtxMeta ma2 ▸ CtxMeta ma1 ▸ CtxSolved ma (Fix (TPair (Fix (TMeta ma1)) (Fix (TMeta ma2)))) <> r
-    instantiate dir ma1 a
-    ctx' <- getCtx
-    instantiate dir ma2 (applySolutions ctx' b)
+        -- Inst*Kappa
+        go ctx | Just (l, r) <- ctxHole (CtxMeta ma) ctx, Fix (TKappa a b) <- t = do
+          ma1 <- freshMeta EStack
+          ma2 <- freshMeta EStack
+          putCtx $ l ▸ CtxMeta ma2 ▸ CtxMeta ma1 ▸ CtxSolved ma (Fix (TKappa (Fix (TMeta ma1)) (Fix (TMeta ma2)))) <> r
+          inst (opposite dir) ma1 a
+          getCtx >>= \ctx' -> inst dir ma2 (applySolutions ctx' b)
 
-  -- InstLAllR
-  go ctx | Fix (TForall b s) <- t, Rigid <- dir = do
-    putCtx $ ctx ▸ CtxVar b
-    instantiate dir ma s
-    modifyCtx (ctxDrop (CtxVar b))
+        -- InstLAllR
+        go ctx | Fix (TForall b s) <- t, Rigid <- dir = do
+          putCtx $ ctx ▸ CtxVar b
+          inst dir ma s
+          modifyCtx (ctxDrop (CtxVar b))
 
-  -- InstRAllL
-  go ctx | Fix (TForall b s) <- t, Flex <- dir = do
-    ma' <- freshMeta (tvKind b)
-    putCtx $ ctx ▸ CtxMarker ma' ▸ CtxMeta ma'
-    instantiate dir ma (subst (b, Fix (TMeta ma')) s)
-    modifyCtx (ctxDrop (CtxMarker ma'))
+        -- InstRAllL
+        go ctx | Fix (TForall b s) <- t, Flex <- dir = do
+          ma' <- freshMeta (tvKind b)
+          putCtx $ ctx ▸ CtxMarker ma' ▸ CtxMeta ma'
+          inst dir ma (subst (b, Fix (TMeta ma')) s)
+          modifyCtx (ctxDrop (CtxMarker ma'))
 
-  -- InstLExistsR
-  go ctx | Fix (TExists b s) <- t, Rigid <- dir = do
-    ma' <- freshMeta (tvKind b)
-    putCtx $ ctx ▸ CtxMarker ma' ▸ CtxMeta ma'
-    instantiate dir ma (subst (b, Fix (TMeta ma')) s)
-    modifyCtx (ctxDrop (CtxMarker ma'))
+        -- InstLExistsR
+        go ctx | Fix (TExists b s) <- t, Rigid <- dir = do
+          ma' <- freshMeta (tvKind b)
+          putCtx $ ctx ▸ CtxMarker ma' ▸ CtxMeta ma'
+          inst dir ma (subst (b, Fix (TMeta ma')) s)
+          modifyCtx (ctxDrop (CtxMarker ma'))
 
-  -- InstRExistsL
-  go ctx | Fix (TExists b s) <- t, Flex <- dir = do
-    putCtx $ ctx ▸ CtxVar b
-    instantiate dir ma s
-    modifyCtx (ctxDrop (CtxVar b))
+        -- InstRExistsL
+        go ctx | Fix (TExists b s) <- t, Flex <- dir = do
+          putCtx $ ctx ▸ CtxVar b
+          inst dir ma s
+          modifyCtx (ctxDrop (CtxVar b))
 
-  -- InstOther
-  go ctx | Just (l, r) <- ctxHole (CtxMeta ma) ctx, Fix t' <- t = do
-    (tasks :: [(MetaVar, Type)], t'') <- runWriter $ forM t' $ \a -> do
-      k <- inferKind dummyPos a
-      ma' <- freshMeta k
-      tell [(ma', a)]
-      return (Fix (TMeta ma'))
-    putCtx $ foldl (▸) l (map (CtxMeta . fst) tasks) ▸ CtxSolved ma (Fix t'') <> r
-    forM_ tasks $ \(mv, a) ->
-      getCtx >>= \ctx' -> instantiate dir mv (applySolutions ctx' a)
+        -- InstOther
+        go ctx | Just (l, r) <- ctxHole (CtxMeta ma) ctx, Fix t' <- t = do
+          (tasks :: [(MetaVar, Type)], t'') <- runWriter $ forM t' $ \a -> do
+            k <- inferKind dummyPos a
+            ma' <- freshMeta k
+            tell [(ma', a)]
+            return (Fix (TMeta ma'))
+          putCtx $ foldl (▸) l (map (CtxMeta . fst) tasks) ▸ CtxSolved ma (Fix t'') <> r
+          forM_ tasks $ \(mv, a) ->
+            getCtx >>= \ctx' -> inst dir mv (applySolutions ctx' a)
 
-  go _ = error $ "internal error: failed to instantiate " ++ show ma ++ " to " ++ show t
+        go _ = error $ "internal error: failed to instantiate " ++ show ma ++ " to " ++ show t
 
 ----------------------------------------------------------------------
 
@@ -469,9 +470,8 @@ infer (Fix (Annot pos e t)) = do
 
 infer (Fix (Lambda _ x e)) = do
   ma  <- freshMeta Star
-  me  <- freshMeta Row
   ma' <- freshMeta Star
-  modifyCtx $ \c -> c ▸ CtxMarker ma ▸ CtxMeta ma ▸ CtxMeta me ▸ CtxMeta ma' ▸ CtxAssump x (Fix (TMeta ma))
+  modifyCtx $ \c -> c ▸ CtxMarker ma ▸ CtxMeta ma ▸ CtxMeta ma' ▸ CtxAssump x (Fix (TMeta ma))
   check e (Fix (TMeta ma'))
   ctx <- getCtx
   case ctxHole (CtxMarker ma) ctx of
@@ -479,7 +479,10 @@ infer (Fix (Lambda _ x e)) = do
       let tau = applySolutions r (Fix (TArrow (Fix (TMeta ma)) (Fix (TMeta ma'))))
       putCtx l
       let (vars, r') = ctxUnsolved r
-      return (foldr ((Fix .) . TForall) (applySolutions r' tau) vars)
+      pure $ foldr
+        (\(MetaVar y k) -> Fix . TForall (TVar y k))
+        (applySolutions r' tau)
+        (filter (`freeMetaIn` tau) vars)
     Nothing -> error "internal error: could not find marker"
 
 infer (Fix (App _ e1 e2)) = do
@@ -579,16 +582,16 @@ inferExprType
      ( TypeChecking sig
      , Carrier sig m
      , TypePrim (Sum (Map Const p))
-     ) => Expr p -> m (Type, Type)
+     ) => Expr p -> m Type
 inferExprType expr = do
   t <- infer expr
   ctx <- getCtx
-  pure (applySolutions ctx t, Fix TRowEmpty)
+  pure (applySolutions ctx t)
 
 ----------------------------------------------------------------------
 
-(≥) :: (TypeChecking sig, Carrier sig m) => Type -> Type -> m ()
-(≥) = flip (≤)
+-- (≥) :: (TypeChecking sig, Carrier sig m) => Type -> Type -> m ()
+-- (≥) = flip (≤)
 
 -- >>> :set -XOverloadedStrings
 -- >>> runInfer $ Fix (TForall (TVar 0 Star) (Fix (TRef (TVar 0 Star)))) ≤ Fix (TExists (TVar 1 Star) (Fix (TRef (TVar 1 Star))))
