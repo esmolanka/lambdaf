@@ -34,10 +34,10 @@ ppKind :: Kind -> Doc ann
 ppKind (Arr a@Arr{} b) = parens (ppKind a) <+> "→" <+> ppKind b
 ppKind (Arr a b) = ppKind a <+> "→" <+> ppKind b
 ppKind Star     = "⋆"
-ppKind Row      = "ROW"
-ppKind Presence = "PRE"
-ppKind EStar    = "⋆̂"
-ppKind EStack   = "STACK"
+ppKind Row      = "Ω"
+ppKind Presence = "Ψ"
+ppKind EStar    = "▴"
+ppKind EStack   = "Σ"
 
 
 ppTyVar :: TVar -> Doc ann
@@ -73,7 +73,7 @@ ppType = (group .) . para $ \case
   TSNil -> "ε"
   TSCons (_,h) (_,t) -> h <+> "::" <+> t
 
-  TEArrow (Fix TSNil,_) (_,b) -> "⟨" <> b <> "⟩"
+  TEArrow (Fix TSNil,_) (_, b) -> "⟨" <> b <> "⟩"
   TEArrow (_,a) (_,b) -> "⟨" <> a <+> "⇒" <+> b <> "⟩"
 
   TCtor name -> pretty name

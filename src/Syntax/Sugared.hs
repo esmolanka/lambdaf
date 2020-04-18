@@ -73,7 +73,7 @@ data SugaredF e
   | Literal Position Literal
   | If      Position e e e
   | MkList  Position [e]
-  | MkTuple Position e e [e]
+  | MkTuple Position [e]
   | MkRec   Position [(Label, e)]
   | RecProj Position Label e
   | RecDef  Position Label e e
@@ -83,6 +83,7 @@ data SugaredF e
   | Delay   Position e
   | Force   Position e
   | DoBlock Position [SeqBinding e]
+  | Loop    Position [Variable] e
   | Kappa   Position [Variable] e
   | Catch   Position e [VariantMatchLeg e]
     deriving (Generic)
@@ -152,15 +153,14 @@ desugar = resolvePrimitives . futu coalg
             lcons x xs' = mkApp (dsPos pos) (Free $ Raw.Prim (dsPos pos) (inject' Raw.ListCons)) [Pure x, xs']
         in unFree $ foldr lcons lnil xs
 
-      Fix (MkTuple pos a b cs) ->
-        let ultimate = last (a : b : cs)
-            elems    = init (a : b : cs)
-            primPair = Free (Raw.Prim (dsPos pos) (inject' Raw.MkPair))
+      Fix (MkTuple pos elems) ->
+        let primCons = Free (Raw.Prim (dsPos pos) (inject' (Raw.KPrim Raw.ECons)))
+            primNil  = Free (Raw.Prim (dsPos pos) (inject' (Raw.KConstNil)))
             app f x = Free (Raw.App (dsPos pos) f x)
         in unFree $
              foldr
-               (\x rest_ -> (primPair `app` Pure x) `app` rest_)
-               (Pure ultimate)
+               (\x rest_ -> (primCons `app` Pure x) `app` rest_)
+               primNil
                elems
 
       Fix (MkRec pos elems) ->
@@ -232,6 +232,17 @@ desugar = resolvePrimitives . futu coalg
                       OrdinarySeqBinding x e -> mkSeq pos x e (Free (Raw.Ref (dsPos pos) x)))
                   (init stmts)
 
+      Fix (Loop pos xs body) ->
+        let primLoop = Free (Raw.Prim (dsPos pos) (inject' (Raw.KPrim Raw.ELoop)))
+            primKappa = Free (Raw.Prim (dsPos pos) (inject' Raw.KAbs))
+            app f a  = Free (Raw.App (dsPos pos) f a)
+            lam v b  = Free (Raw.Lambda (dsPos pos) v b)
+        in unFree $
+             foldr
+               (\bnd rest_ -> primLoop `app` (primKappa `app` lam bnd rest_))
+               (Pure body)
+               (reverse xs)
+
       Fix (Kappa pos xs body) ->
         let app f a = Free (Raw.App (dsPos pos) f a)
             lam v b = Free (Raw.Lambda (dsPos pos) v b)
@@ -289,7 +300,10 @@ primitives _ = M.fromList
   , (Variable "^sub",        (0, inject' (Raw.KPrim Raw.ESub)))
   , (Variable "^div",        (0, inject' (Raw.KPrim Raw.EDiv)))
   , (Variable "^fold",       (0, inject' (Raw.KPrim Raw.EFold)))
-  , (Variable "^loop",       (0, inject' (Raw.KPrim Raw.ELoop)))
+  , (Variable "^cons",       (0, inject' (Raw.KPrim Raw.ECons)))
+  , (Variable "^nil",        (0, inject' Raw.KConstNil))
+  , (Variable "^head",       (0, inject' (Raw.KPrim Raw.EHead)))
+  , (Variable "^tail",       (0, inject' (Raw.KPrim Raw.ETail)))
   , (Variable "^fun",        (0, inject' (Raw.KAbs)))
   ]
 
@@ -347,7 +361,7 @@ varGrammar =
   where
     parseVar :: Text -> Either Mismatch Variable
     parseVar t
-      | t `elem` ["lambda","let","if","case","catch","do","kappa","=","<-","**","tt","ff"] = Left (unexpected t)
+      | t `elem` ["lambda","let","if","case","catch","do","loop","kappa","=","<-","**","tt","ff"] = Left (unexpected t)
       | Just (h, _) <- uncons t, h == ':' || isUpper h = Left (unexpected t)
       | otherwise = Right (Variable t)
 
@@ -494,8 +508,6 @@ sugaredGrammar = fixG $ match
             swap >>>
             list (
              el (sym "**") >>>
-             el sugaredGrammar >>>
-             el sugaredGrammar >>>
              rest sugaredGrammar) >>> mktuple)
 
   $ With (\mkrec ->
@@ -579,6 +591,19 @@ sugaredGrammar = fixG $ match
                    rest seqStmtGrammar >>>
                    onTail cons) >>>
              doblock)
+
+  $ With (\loop ->
+             annotated "loop" $
+             position >>>
+             swap >>>
+             list (
+               el (sym "loop") >>>
+               el (list (
+                     el varGrammar >>>
+                     rest varGrammar)) >>>
+               onTail cons >>>
+               el sugaredGrammar) >>>
+             loop)
 
     $ With (\kappa ->
              annotated "kappa expression" $

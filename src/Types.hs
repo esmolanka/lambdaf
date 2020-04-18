@@ -29,9 +29,10 @@ module Types
   , (@:)
   , (#:)
   , typeListOf
-  , typePairOf
+  , typeTupleOf
   , typeVectorOf
   , typeExprOf
+  , kindsOfTypes
   ) where
 
 import Control.Monad
@@ -80,6 +81,8 @@ data EType
   = TEDouble
   deriving (Show, Eq, Ord)
 
+type CtorName = Text
+
 type Type = Fix TypeF
 data TypeF e
   ----------------------------------------------------------------------
@@ -97,11 +100,11 @@ data TypeF e
 
   ----------------------------------------------------------------------
   -- User-defined types
-  | TCtor   Text
+  | TCtor CtorName
 
   ----------------------------------------------------------------------
   -- Row typed records and variants
-  | TRecord e              -- ROW -> STAR
+  | TRecord  e             -- ROW -> STAR
   | TVariant e             -- ROW -> STAR
 
   | TPresent               -- PRESENCE
@@ -113,7 +116,7 @@ data TypeF e
   ----------------------------------------------------------------------
   -- Embedded language types
   | TSNil                  -- ESTACK
-  | TSCons e e             -- ESTAR -> ESTACK -> ESTACK
+  | TSCons  e e            -- ESTAR -> ESTACK -> ESTACK
   | TEArrow e e            -- ESTACK -> ESTAR -> STAR
 
   deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic1)
@@ -183,11 +186,23 @@ infixl 7 @:
 typeVectorOf :: Type -> Type
 typeVectorOf a = (Fix (TCtor "EVec") @: a)
 
-typePairOf :: Type -> Type -> Type
-typePairOf a b = Fix (TCtor "EPair") @: a @: b
+typeTupleOf :: Type -> Type
+typeTupleOf a = Fix (TCtor "ETuple") @: a
 
 typeListOf :: Type -> Type
 typeListOf a = (Fix (TCtor "List") @: a)
 
 typeExprOf :: Type -> Type
 typeExprOf r = Fix (TEArrow (Fix TSNil) r)
+
+kindsOfTypes :: [(CtorName, Kind)]
+kindsOfTypes =
+  [ "List"    %:: Star `Arr` Star
+  , "Pair"    %:: Star `Arr` (Star `Arr` Star)
+  , "EVec"    %:: EStar `Arr` EStar
+  , "ETuple"  %:: EStack `Arr` EStar
+  , "EDouble" %:: EStar
+  ]
+  where
+    (%::) = (,)
+    infix 1 %::

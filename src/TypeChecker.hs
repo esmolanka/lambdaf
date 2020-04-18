@@ -307,7 +307,7 @@ freshMeta k = do
       (Fix (TRowExtend lbl p f rest)) ≤ (Fix (TRowExtend lbl (Fix TAbsent) f (Fix TRowEmpty)))
 
     a ≤· b = ask @Position >>= \pos -> -- Debug.Trace.trace (show a ++ "\n" ++ show b) $
-      throwError $ TCError pos $ CannotUnify (Fix b) (Fix a)
+      throwError $ TCError pos $ CannotUnify (Fix a) (Fix b)
 
 rewriteRow
   :: (TypeChecking sig, Carrier sig m) =>
@@ -532,14 +532,6 @@ inferApp t e =
 inferKind :: forall m sig. (TypeChecking sig, Carrier sig m) => Position -> Type -> m Kind
 inferKind pos = cata (alg <=< sequence)
   where
-    kinds =
-      [ ("List", Star `Arr` Star)
-      , ("Pair", Star `Arr` (Star `Arr` Star))
-      , ("EVec", EStar `Arr` EStar)
-      , ("EPair", EStar `Arr` (EStar `Arr` EStar))
-      , ("EDouble", EStar)
-      ]
-
     alg :: TypeF Kind -> m Kind
     alg = \case
       TRef tv              -> return (tvKind tv)
@@ -549,7 +541,7 @@ inferKind pos = cata (alg <=< sequence)
 
       T _                  -> return Star
 
-      TCtor n | Just k <- lookup n kinds -> return k
+      TCtor n | Just k <- lookup n kindsOfTypes -> return k
       TApp (Arr a b) c | a == c -> return b
 
       TSNil                -> return EStack
