@@ -18,9 +18,9 @@ module Prim.Kappa
   , KappaPrim(..)
   , EPrim(..)
   , KappaValue(..)
-  , mkVExpr
+  , mkVVal
   , mkVAbs
-  , projExpr
+  , projVal
   , projAbs
   ) where
 
@@ -31,7 +31,6 @@ import Control.Effect.State
 
 import Data.Functor.Const
 import Data.Functor.Foldable (Fix (..), unfix)
-import qualified Data.Set as S
 import Data.Sum
 import Data.Text.Prettyprint.Doc as PP
 
@@ -42,11 +41,11 @@ import Prim.Base
 import Types
 import Utils
 
-type KappaEffect = State EVar
-type KappaEffectC = StateC EVar
+type KappaEffect = State EState
+type KappaEffectC = StateC EState
 
 runKappa :: (Monad m) => KappaEffectC m a -> m a
-runKappa = evalState (EVar 100)
+runKappa = evalState (EState (EVar 100) id [])
 
 data KappaPrim
   = KConstDbl
@@ -56,18 +55,18 @@ data KappaPrim
   | KAbs
 
 data KappaValue e
-  = VExpr EExpr
-  | VAbs  EAbs
+  = VVal EValue
+  | VAbs EAbs
 
-mkVExpr :: (KappaValue :< v) => EExpr -> Value v
-mkVExpr = Fix . inject . VExpr
+mkVVal :: (KappaValue :< v) => EValue -> Value v
+mkVVal = Fix . inject . VVal
 
 mkVAbs :: (KappaValue :< v) => [EVar] -> EExpr -> Value v
 mkVAbs = ((Fix . inject . VAbs) .) . EAbs
 
-projExpr :: (KappaValue :< v) => Value v -> Maybe EExpr
-projExpr v = case project @KappaValue (unfix v) of
-  Just (VExpr e) -> Just e
+projVal :: (KappaValue :< v) => Value v -> Maybe EValue
+projVal v = case project @KappaValue (unfix v) of
+  Just (VVal e) -> Just e
   _ -> Nothing
 
 projAbs :: (KappaValue :< v) => Value v -> Maybe EAbs
@@ -77,7 +76,7 @@ projAbs v = case project @KappaValue (unfix v) of
 
 instance Pretty1 KappaValue where
   liftPretty _pp = \case
-    VExpr e -> ppEExpr e
+    VVal v -> ppEValue v
     VAbs f  -> ppEAbs f
 
 instance PrettyPrim (Const KappaPrim) where
@@ -89,7 +88,7 @@ instance PrettyPrim (Const KappaPrim) where
     Const KAbs       -> "κ"
 
 instance
-  ( Member (RuntimeErrorEffect) sig
+  ( Member RuntimeErrorEffect sig
   , Member KappaEffect sig
   , Carrier sig m
   , LambdaValue m :< v
@@ -100,7 +99,7 @@ instance
     Const KConstDbl ->
       pure $ mkVLam @m $ \x ->
         case projBase x of
-          Just (VDbl x') -> pure $ mkVExpr (EReturn (ELit x'))
+          Just (VDbl x') -> pure $ mkVVal (ELit x')
           _ -> evalError "Value is not a double!"
 
     Const KConstVec ->
@@ -108,56 +107,57 @@ instance
         case projBase xs of
           Just (VList xs') -> do
             xs'' <- traverse (\x -> case projBase x of {Just (VDbl x') -> pure x'; _ -> evalError "Value is not a double!" }) xs'
-            pure $ mkVExpr (EReturn (EVec xs''))
+            pure $ mkVVal (EVec xs'')
           _ -> evalError "Value is not a list of doubles!"
 
     Const KConstNil ->
-      pure $ mkVExpr (EReturn ENil)
+      pure $ mkVVal ENil
 
     Const (KPrim EFold) ->
       pure $ mkVLam @m $ \f ->
       pure $ mkVLam @m $ \x ->
       pure $ mkVLam @m $ \y ->
-        case (projAbs f, projExpr x, projExpr y) of
-          (Just f', Just x', Just y') -> mkVExpr <$> eapply EFold [f'] [x', y']
+        case (projAbs f, projVal x, projVal y) of
+          (Just f', Just x', Just y') -> mkVVal <$> eapply EFold [f'] [x', y']
           _ -> evalError "Wrong argument"
 
     Const (KPrim ELoop) ->
       pure $ mkVLam @m $ \f ->
         case projAbs f of
-          Just f' -> mkVExpr <$> eapply ELoop [f'] []
+          Just f' -> mkVVal <$> eapply ELoop [f'] []
           _ -> evalError "Wrong argument"
 
     Const (KPrim EHead) ->
       pure $ mkVLam @m $ \x ->
-        case projExpr x of
-          Just x' -> mkVExpr <$> eapply EHead [] [x']
+        case projVal x of
+          Just x' -> mkVVal <$> eapply EHead [] [x']
           _ -> evalError "Wrong argument"
 
     Const (KPrim ETail) ->
       pure $ mkVLam @m $ \x ->
-        case projExpr x of
-          Just x' -> mkVExpr <$> eapply ETail [] [x']
+        case projVal x of
+          Just x' -> mkVVal <$> eapply ETail [] [x']
           _ -> evalError "Wrong argument"
 
     Const (KPrim prim) ->
       pure $ mkVLam @m $ \x ->
       pure $ mkVLam @m $ \y ->
-        case (projExpr x, projExpr y) of
-          (Just x', Just y') -> mkVExpr <$> eapply prim [] [x', y']
+        case (projVal x, projVal y) of
+          (Just x', Just y') -> mkVVal <$> eapply prim [] [x', y']
           _ -> evalError "Wrong argument"
 
     Const KAbs ->
       pure $ mkVLam @m $ \f ->
         case projLambda f of
           Just f' -> do
-            var <- get
-            modify (\(EVar n) -> EVar (n + 1))
-            body <- f' (mkVExpr (EReturn (ERef var)))
-            case (projExpr body, projAbs body) of
-              (Just body', _) -> pure $ mkVAbs [var] body'
-              (_, Just (EAbs vars body')) -> pure $ mkVAbs (var : vars) body'
-              _ -> evalError "Lambda returned not a kappa!"
+            ekappa $ \var -> do
+              res <- f' (mkVVal (ERef var))
+              case (projVal res, projAbs res) of
+                (Just res', _) -> do
+                  body <- ereturn res'
+                  pure $ mkVAbs [var] body
+                (_, Just (EAbs vars body')) -> pure $ mkVAbs (var : vars) body'
+                _ -> evalError "Lambda returned not a kappa!"
           _ -> evalError "Value is not a lambda!"
 
 instance TypePrim (Const KappaPrim) where
@@ -248,6 +248,12 @@ instance TypePrim (Const KappaPrim) where
 
 ----------------------------------------------------------------------
 
+data EState = EState
+  { freshVar :: EVar
+  , focused  :: EExpr -> EExpr
+  , unfocused :: [EExpr -> EExpr]
+  }
+
 newtype EVar = EVar Int
   deriving (Show, Ord, Eq)
 
@@ -279,35 +285,39 @@ data EValue
   | ENil
   deriving (Show)
 
-fresh :: (Member (State EVar) sig, Carrier sig m) => m EVar
+fresh :: (Member KappaEffect sig, Carrier sig m) => m EVar
 fresh = do
-  x <- get
-  modify (\(EVar n) -> EVar (succ n))
+  x <- gets freshVar
+  modify (\st -> let EVar n = freshVar st in st { freshVar = EVar (succ n) })
   return x
 
-chain :: [EExpr] -> ([EValue] -> EExpr) -> EExpr
-chain arguments fun =
-  foldr
-    (\expr rest vs acc -> with acc expr (\acc' v -> rest (v : vs) acc'))
-    (\vs _ -> fun (reverse vs))
-    arguments [] mempty
-  where
-    with :: S.Set EVar -> EExpr -> (S.Set EVar -> EValue -> EExpr) -> EExpr
-    with used0 expr0 k = go used0 expr0
-      where
-        go :: S.Set EVar -> EExpr -> EExpr
-        go used = \case
-          ELet ref prim fs args rest
-            | S.member ref used -> go used rest
-            | otherwise -> ELet ref prim fs args (go (S.insert ref used) rest)
-          EReturn val ->
-            k used val
+ekappa :: (Member KappaEffect sig, Carrier sig m) => (EVar -> m a) -> m a
+ekappa body = do
+  modify $ \st -> st
+    { focused   = id
+    , unfocused = focused st : unfocused st
+    }
+  var <- fresh
+  body var
 
-eapply :: (Member (State EVar) sig, Carrier sig m) => EPrim -> [EAbs] -> [EExpr] -> m EExpr
-eapply newprim funs args = do
-  x <- fresh
-  pure $ chain args $ \vals ->
-    ELet x newprim funs vals (EReturn (ERef x))
+
+eapply :: (Member KappaEffect sig, Carrier sig m) => EPrim -> [EAbs] -> [EValue] -> m EValue
+eapply p fs xs = do
+  var <- fresh
+  let entry = ELet var p fs xs
+  modify $ \st -> st { focused = focused st . entry }
+  pure (ERef var)
+
+ereturn :: (Member KappaEffect sig, Carrier sig m) => EValue -> m EExpr
+ereturn result = do
+  expr <- gets focused
+  rest <- gets unfocused
+  case rest of
+    [] -> modify $ \st -> st { focused = id }
+    (c : cs) -> modify $ \st -> st { focused = c, unfocused = cs }
+  pure $ expr $ EReturn result
+
+----------------------------------------------------------------------
 
 ppEVar :: EVar -> Doc ann
 ppEVar (EVar n) = "@" <> pretty n
