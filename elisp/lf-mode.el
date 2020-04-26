@@ -66,9 +66,27 @@
        t)
       (display-buffer output-buffer))))
 
+(defun lf-eval-last-sexp ()
+  (interactive)
+  (let* ((output-buffer (get-buffer-create "*LF Output*"))
+         (beginning (progn (backward-sexp) (point)))
+         (end   (progn (forward-sexp) (point))))
+    (progn
+      (with-current-buffer output-buffer
+        (erase-buffer))
+      (call-process-region
+       beginning
+       end
+       flycheck-lf-executable
+       nil
+       output-buffer
+       t)
+      (display-buffer output-buffer))))
+
 (defvar lf-mode-map
   (let ((map (make-keymap)))
     (define-key map (kbd "C-c C-l") 'lf-load-file)
+    (define-key map (kbd "C-x C-e") 'lf-eval-last-sexp)
     map)
   "Keymap for LF major mode")
 
