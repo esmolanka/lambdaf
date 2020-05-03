@@ -1,14 +1,21 @@
-{-# LANGUAGE DeriveFoldable       #-}
-{-# LANGUAGE DeriveFunctor        #-}
-{-# LANGUAGE DeriveGeneric        #-}
-{-# LANGUAGE DeriveTraversable    #-}
-{-# LANGUAGE FlexibleInstances    #-}
-{-# LANGUAGE KindSignatures       #-}
-{-# LANGUAGE LambdaCase           #-}
-{-# LANGUAGE OverloadedStrings    #-}
-{-# LANGUAGE StandaloneDeriving   #-}
-{-# LANGUAGE TypeApplications     #-}
-{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE ConstraintKinds        #-}
+{-# LANGUAGE DataKinds              #-}
+{-# LANGUAGE DeriveFoldable         #-}
+{-# LANGUAGE DeriveFunctor          #-}
+{-# LANGUAGE DeriveGeneric          #-}
+{-# LANGUAGE DeriveTraversable      #-}
+{-# LANGUAGE FlexibleContexts       #-}
+{-# LANGUAGE FlexibleInstances      #-}
+{-# LANGUAGE FunctionalDependencies #-}
+{-# LANGUAGE KindSignatures         #-}
+{-# LANGUAGE LambdaCase             #-}
+{-# LANGUAGE MultiParamTypeClasses  #-}
+{-# LANGUAGE OverloadedStrings      #-}
+{-# LANGUAGE ScopedTypeVariables    #-}
+{-# LANGUAGE StandaloneDeriving     #-}
+{-# LANGUAGE TypeApplications       #-}
+{-# LANGUAGE TypeOperators          #-}
+{-# LANGUAGE UndecidableInstances   #-}
 
 module Types
   ( Kind(..)
@@ -19,6 +26,8 @@ module Types
   , Label(..)
   , getRowTail
   , TypePrim(..)
+  , KindOfCtor(..)
+  , TypeConstructor
   , TyScheme
   , toType
   , forall
@@ -27,23 +36,19 @@ module Types
   , (@:)
   , (#:)
   , typeCtor
-  , typeListOf
-  , typeTupleOf
-  , typeVectorOf
-  , typeExprOf
-  , kindsOfTypes
   ) where
 
 import Control.Monad
 import Data.Functor.Classes
 import Data.Functor.Classes.Generic
 import Data.Functor.Foldable (Fix(..), cata)
-import Data.Sum
-import Data.Void
 import Data.String
+import Data.Sum
 import Data.Text (Text)
-
+import Data.Void
 import GHC.Generics
+
+import Utils
 
 newtype Label = Label Text
     deriving (Show, Eq, Ord)
@@ -70,10 +75,8 @@ data MetaVar = MetaVar
   , etvKind :: Kind
   } deriving (Show, Eq, Ord)
 
-type CtorName = Text
-
-type Type = Fix TypeF
-data TypeF e
+type Type p = Fix (TypeF p)
+data TypeF (p :: [*]) e
   ----------------------------------------------------------------------
   -- Base language
   = TRef    TVar           -- κ
@@ -88,7 +91,7 @@ data TypeF e
 
   ----------------------------------------------------------------------
   -- User-defined types
-  | TCtor CtorName
+  | TCtor (Sum' p)
 
   ----------------------------------------------------------------------
   -- Row typed records and variants
@@ -107,18 +110,18 @@ data TypeF e
   | TSCons  e e            -- ESTAR -> ESTACK -> ESTACK
   | TEArrow e e            -- ESTACK -> ESTAR -> STAR
 
-  deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic1)
+  deriving (Functor, Foldable, Traversable, Generic1)
 
-instance Eq1 TypeF where
+instance (Apply Eq1 (Map Const t)) => Eq1 (TypeF t) where
   liftEq = liftEqDefault
 
-instance Ord1 TypeF where
+instance (Apply Eq1 (Map Const t), Apply Ord1 (Map Const t)) => Ord1 (TypeF t) where
   liftCompare = liftCompareDefault
 
-instance Show1 TypeF where
+instance (Apply Show1 (Map Const t)) => Show1 (TypeF t) where
   liftShowsPrec = liftShowsPrecDefault
 
-getRowTail :: Type -> Maybe TVar
+getRowTail :: Type t -> Maybe TVar
 getRowTail =
   cata $ \case
     TRowExtend _ _ _ x -> x
@@ -128,25 +131,41 @@ getRowTail =
 ----------------------------------------------------------------------
 -- Prims typing algebra
 
-data TyScheme = TyScheme
-  { tsForall :: [TVar]
-  , tsBody   :: Type
-  } deriving (Show, Eq, Ord)
+class TypePrim (t :: [*]) (p :: * -> *) where
+  typePrim :: p Void -> TyScheme t
 
-toType :: TyScheme -> Type
-toType (TyScheme vars body) =
-  foldr (\x rest -> Fix $ TForall x rest) body vars
+instance forall t ps. (Apply (TypePrim t) ps) => TypePrim t (Sum ps) where
+  typePrim = apply @(TypePrim t) typePrim
 
-class TypePrim (p :: * -> *) where
-  typePrim :: p Void -> TyScheme
+class KindOfCtor (t :: * -> *) where
+  kindOfCtor :: t Void -> Kind
 
-instance (Apply TypePrim ps) => TypePrim (Sum ps) where
-  typePrim = apply @TypePrim typePrim
+instance (Apply KindOfCtor ts) => KindOfCtor (Sum ts) where
+  kindOfCtor = apply @KindOfCtor kindOfCtor
+
+type TypeConstructor t =
+  ( Apply Eq1        (Map Const t)
+  , Apply Show1      (Map Const t)
+  , Apply Pretty1    (Map Const t)
+  , Apply KindOfCtor (Map Const t)
+  )
+
+typeCtor :: (t :<< ts) => t -> Type ts
+typeCtor = Fix . TCtor . inject'
 
 ----------------------------------------------------------------------
 -- Types DSL
 
-forall :: Kind -> (Type -> TyScheme) -> TyScheme
+data TyScheme t = TyScheme
+  { _tsForall :: [TVar]
+  , _tsBody   :: Type t
+  }
+
+toType :: TyScheme t -> Type t
+toType (TyScheme vars body) =
+  foldr (\x rest -> Fix $ TForall x rest) body vars
+
+forall :: Kind -> (Type t -> TyScheme t) -> TyScheme t
 forall k f =
   let TyScheme bs ty = f (Fix (TRef tv))
       n = case bs of
@@ -155,48 +174,18 @@ forall k f =
       tv = TVar n k
   in  TyScheme (tv : bs) ty
 
-mono :: Type -> TyScheme
+mono :: Type t -> TyScheme t
 mono ty = TyScheme [] ty
 
 infixr 3 ~>
 
-(~>) :: Type -> Type -> Type
+(~>) :: Type t -> Type t -> Type t
 a ~> b = Fix (TArrow a b)
 
-(#:) :: Type -> Type -> Type
+(#:) :: Type t -> Type t -> Type t
 (#:) a b = Fix (TSCons a b)
 infixr 5 #:
 
-(@:) :: Type -> Type -> Type
+(@:) :: Type t -> Type t -> Type t
 (@:) f a = Fix (TApp f a)
 infixl 7 @:
-
-typeCtor :: Text -> Type
-typeCtor = Fix . TCtor
-
-typeVectorOf :: Type -> Type
-typeVectorOf a = (Fix (TCtor "EVec") @: a)
-
-typeTupleOf :: Type -> Type
-typeTupleOf a = Fix (TCtor "ETuple") @: a
-
-typeListOf :: Type -> Type
-typeListOf a = (Fix (TCtor "List") @: a)
-
-typeExprOf :: Type -> Type
-typeExprOf r = Fix (TEArrow (Fix TSNil) r)
-
-kindsOfTypes :: [(CtorName, Kind)]
-kindsOfTypes =
-  [ "Float"   %:: Star
-  , "Bool"    %:: Star
-  , "Unit"    %:: Star
-  , "Text"    %:: Star
-  , "List"    %:: Star `Arr` Star
-  , "EVec"    %:: EStar `Arr` EStar
-  , "ETuple"  %:: EStack `Arr` EStar
-  , "EFloat"  %:: EStar
-  ]
-  where
-    (%::) = (,)
-    infix 1 %::

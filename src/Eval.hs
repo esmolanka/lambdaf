@@ -71,16 +71,16 @@ class EvalPrim m v (p :: * -> *) where
 instance (Apply (EvalPrim m v) ps) => EvalPrim m v (Sum ps) where
   evalPrim = apply @(EvalPrim m v) evalPrim
 
-eval :: forall m sig (p :: [*]) (v :: [* -> *]).
+eval :: forall m sig (t :: [*]) (p :: [*]) (v :: [* -> *]).
   ( Member (RuntimeErrorEffect) sig
   , Member (EnvEffect v) sig
   , Carrier sig m
   , EvalPrim m v (Sum (Map Const p))
   , LambdaValue m :< v
-  ) => Expr p -> m (Value v)
+  ) => Expr t p -> m (Value v)
 eval = cata alg
   where
-    alg :: ExprF p (m (Value v)) -> m (Value v)
+    alg :: ExprF t p (m (Value v)) -> m (Value v)
     alg = \case
       Ref pos x -> do
         v <- askEnv x

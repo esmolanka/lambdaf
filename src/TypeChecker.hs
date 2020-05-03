@@ -29,6 +29,7 @@ import Data.Foldable (toList, fold)
 import Data.Functor.Foldable (Fix (..), cata)
 import Data.Maybe
 import Data.Monoid (All(..), Any(..))
+import Data.Proxy
 import Data.Sequence (Seq(..))
 import qualified Data.Sequence as Seq
 import Data.Sum
@@ -46,7 +47,7 @@ import Pretty
 trace :: String -> a -> a
 trace = if False then Debug.Trace.trace else flip const
 
-isMono :: Type -> Bool
+isMono :: Type t -> Bool
 isMono = getAll . cata alg
   where
     alg = \case
@@ -54,21 +55,28 @@ isMono = getAll . cata alg
       TExists _ _ -> All False
       other -> fold other
 
-data CtxMember
+data CtxMember t
   = CtxVar    TVar
-  | CtxAssump Variable Type
+  | CtxAssump Variable (Type t)
   | CtxMeta   MetaVar
-  | CtxSolved MetaVar Type
+  | CtxSolved MetaVar (Type t)
   | CtxMarker MetaVar
-  deriving (Eq, Ord, Show)
 
-newtype Ctx = Ctx (Seq CtxMember)
-  deriving (Eq, Show, Semigroup, Monoid)
+instance Eq (CtxMember t) where
+  CtxVar x == CtxVar y = x == y
+  CtxAssump x _ == CtxAssump y _ = x == y
+  CtxMeta x == CtxMeta y = x == y
+  CtxSolved x _ == CtxSolved y _ = x == y
+  CtxMarker x == CtxMarker y = x == y
+  _ == _ = False
 
-ppCtx :: Ctx -> Doc ann
+newtype Ctx t = Ctx (Seq (CtxMember t))
+  deriving (Semigroup, Monoid)
+
+ppCtx :: forall t ann. Apply' Pretty1 t => Ctx t -> Doc ann
 ppCtx (Ctx elems) = indent 2 . vsep . map ppMember . toList $ elems
   where
-    ppMember :: CtxMember -> Doc ann
+    ppMember :: CtxMember t -> Doc ann
     ppMember = \case
       CtxVar tv       -> "skolem" <+> ppTyVar tv
       CtxAssump v ty  -> "assump" <+> ppVariable v <+> ":" <+> ppType ty
@@ -76,23 +84,23 @@ ppCtx (Ctx elems) = indent 2 . vsep . map ppMember . toList $ elems
       CtxSolved ev ty -> "solved" <+> ppMetaVar ev <+> "=" <+> ppType ty
       CtxMarker ev    -> "marker" <+> "▸" <> ppMetaVar ev
 
-(▸) :: Ctx -> CtxMember -> Ctx
+(▸) :: Ctx t -> CtxMember t -> Ctx t
 (Ctx ctx) ▸ mem = Ctx (ctx :|> mem)
 
-ctxHole :: CtxMember -> Ctx -> Maybe (Ctx, Ctx)
+ctxHole :: CtxMember t -> Ctx t -> Maybe (Ctx t, Ctx t)
 ctxHole mem (Ctx ctx) =
   let (front, rear) = Seq.breakr (== mem) ctx
   in case rear of
        Empty -> Nothing
        rear' :|> _ -> Just (Ctx rear', Ctx front)
 
-ctxHoles :: CtxMember -> CtxMember -> Ctx -> Maybe (Ctx, Ctx, Ctx)
+ctxHoles :: CtxMember t -> CtxMember t -> Ctx t -> Maybe (Ctx t, Ctx t, Ctx t)
 ctxHoles x y ctx = do
   (a, rest) <- ctxHole x ctx
   (b, c)    <- ctxHole y rest
   return (a, b, c)
 
-ctxAssump :: Ctx -> Variable -> Maybe Type
+ctxAssump :: Ctx t -> Variable -> Maybe (Type t)
 ctxAssump (Ctx ctx) x = go ctx
   where
     go = \case
@@ -100,7 +108,7 @@ ctxAssump (Ctx ctx) x = go ctx
       _    :|> CtxAssump y t | x == y -> Just t
       rest :|> _ -> go rest
 
-ctxSolution :: Ctx -> MetaVar -> Maybe Type
+ctxSolution :: Ctx t -> MetaVar -> Maybe (Type t)
 ctxSolution (Ctx ctx) x = go ctx
   where
     go = \case
@@ -109,11 +117,11 @@ ctxSolution (Ctx ctx) x = go ctx
       _    :|> CtxMeta   y   | x == y -> Nothing
       rest :|> _ -> go rest
 
-ctxHasSkolem :: Ctx -> TVar -> Bool
+ctxHasSkolem :: Ctx t -> TVar -> Bool
 ctxHasSkolem (Ctx ctx) v =
   CtxVar v `elem` ctx
 
-ctxHasMeta :: Ctx -> MetaVar -> Bool
+ctxHasMeta :: Ctx t -> MetaVar -> Bool
 ctxHasMeta (Ctx ctx) x = go ctx
   where
     go = \case
@@ -122,11 +130,11 @@ ctxHasMeta (Ctx ctx) x = go ctx
       _    :|> CtxMeta   y   | x == y -> True
       rest :|> _ -> go rest
 
-ctxDrop :: CtxMember -> Ctx -> Ctx
+ctxDrop :: CtxMember t -> Ctx t -> Ctx t
 ctxDrop m (Ctx ctx) =
   Ctx $ Seq.dropWhileR (== m) $ Seq.dropWhileR (/= m) ctx
 
-ctxUnsolved :: Ctx -> ([MetaVar], Ctx)
+ctxUnsolved :: Ctx t -> ([MetaVar], Ctx t)
 ctxUnsolved (Ctx ctx) =
   ( flip mapMaybe (toList ctx) $ \case
       CtxMeta m@MetaVar{} -> Just m
@@ -138,126 +146,126 @@ ctxUnsolved (Ctx ctx) =
 
 ----------------------------------------------------------------------
 
-(⊢) :: Ctx -> Type -> Either Reason ()
+(⊢) :: forall t. Ctx t -> Type t -> Either (Reason t) ()
 (⊢) ctx0 ty = run $ runReader ctx0 $ runError (cata alg ty)
   where
-    alg :: (Member (Error Reason) sig, Member (Reader Ctx) sig, Carrier sig m) =>
-           TypeF (m ()) -> m ()
+    alg :: (Member (Error (Reason t)) sig, Member (Reader (Ctx t)) sig, Carrier sig m) =>
+           TypeF t (m ()) -> m ()
     alg t = do
-      ctx <- ask
+      ctx <- ask @(Ctx t)
       case t of
         TRef v ->
           unless (ctxHasSkolem ctx v) $
-            throwError $ TypeVariableNotFound v
+            throwError @(Reason t) $ TypeVariableNotFound v
         TMeta v ->
           unless (ctxHasMeta ctx v) $
-            throwError $ OtherError $ "unscoped meta variable ‘" ++ show v ++ "’"
+            throwError @(Reason t) $ OtherError $ "unscoped meta variable ‘" ++ show v ++ "’"
         TForall v b ->
-          local (▸ CtxVar v) b
+          local @(Ctx t) (▸ CtxVar v) b
         TExists v b ->
-          local (▸ CtxVar v) b
+          local @(Ctx t) (▸ CtxVar v) b
         other -> sequence_ other
 
-freeMetaIn :: MetaVar -> Type -> Bool
+freeMetaIn :: forall t. MetaVar -> Type t -> Bool
 freeMetaIn x = getAny . cata alg
   where
-    alg :: TypeF Any -> Any
+    alg :: TypeF t Any -> Any
     alg = \case
       TMeta v | x == v -> Any True
       other -> fold other
 
-applySolutions :: Ctx -> Type -> Type
+applySolutions :: forall t. Ctx t -> Type t -> Type t
 applySolutions ctx = cata alg
   where
-    alg :: TypeF Type -> Type
+    alg :: TypeF t (Type t) -> Type t
     alg = \case
       TMeta v -> maybe (Fix (TMeta v)) (applySolutions ctx) (ctxSolution ctx v)
       other   -> Fix other
 
-subst :: (TVar, Type) -> Type -> Type
+subst :: forall t. (TVar, Type t) -> Type t -> Type t
 subst (v, s) = cata alg
   where
-    alg :: TypeF Type -> Type
+    alg :: TypeF t (Type t) -> Type t
     alg = \case
       TRef v' | v == v' -> s
       other -> Fix other
 
 ----------------------------------------------------------------------
 
-type TypeChecking sig =
-  ( Member (State CheckState) sig
-  , Member (Error TCError) sig
+type TypeChecking t sig =
+  ( Member (State (CheckState t)) sig
+  , Member (Error (TCError t)) sig
   , Member (Reader Position) sig
   , Effect sig
   )
 
-data CheckState = CheckState
-  { checkCtx :: Ctx
+data CheckState t = CheckState
+  { checkCtx :: Ctx t
   , checkNextEVar :: Int
-  } deriving (Eq, Show)
+  }
 
-defCheckState :: CheckState
+defCheckState :: CheckState t
 defCheckState = CheckState mempty 1
 
-getCtx :: (TypeChecking sig, Carrier sig m) => m Ctx
-getCtx = gets checkCtx
+getCtx :: forall t sig m. (TypeChecking t sig, Carrier sig m) => m (Ctx t)
+getCtx = gets @(CheckState t) checkCtx
 
-putCtx :: (TypeChecking sig, Carrier sig m) => Ctx -> m ()
-putCtx ctx = get >>= \s -> put s { checkCtx = ctx }
+putCtx :: forall t sig m. (TypeChecking t sig, Carrier sig m) => Ctx t -> m ()
+putCtx ctx = get @(CheckState t) >>= \s -> put @(CheckState t) s { checkCtx = ctx }
 
-modifyCtx :: (TypeChecking sig, Carrier sig m) => (Ctx -> Ctx) -> m ()
+modifyCtx :: (TypeChecking t sig, Carrier sig m) => (Ctx t -> Ctx t) -> m ()
 modifyCtx f = putCtx . f =<< getCtx
 
-freshMeta :: (TypeChecking sig, Carrier sig m) => Kind -> m MetaVar
-freshMeta k = do
-  n <- gets checkNextEVar
-  modify (\s -> s { checkNextEVar = checkNextEVar s + 1 })
+freshMeta :: forall t sig m proxy. (TypeChecking t sig, Carrier sig m) => proxy t -> Kind -> m MetaVar
+freshMeta _ k = do
+  n <- gets @(CheckState t) checkNextEVar
+  modify @(CheckState t) (\s -> s { checkNextEVar = checkNextEVar s + 1 })
   pure $ MetaVar n k
 
-(≤) :: forall sig m. (TypeChecking sig, Carrier sig m) => Type -> Type -> m ()
+(≤) :: forall t sig m. (TypeChecking t sig, Carrier sig m, TypeConstructor t) => Type t -> Type t -> m ()
 (≤) (Fix typeA) (Fix typeB) =
-  getCtx >>= \ctx ->
+  getCtx @t >>= \ctx ->
     trace (render $ vsep [ "Checking:" <+> ppType (Fix typeA) <+> "≤" <+> ppType (Fix typeB), ppCtx ctx ]) $
       runReader id (typeA ≤⋆ typeB)
   where
-    (≤⋆) :: (TypeChecking sig, Carrier sig m) => TypeF Type -> TypeF Type -> ReaderC (m () -> m ()) m ()
+    (≤⋆) :: (TypeChecking t sig, Carrier sig m) => TypeF t (Type t) -> TypeF t (Type t) -> ReaderC (m () -> m ()) m ()
     a ≤⋆ TForall v (Fix b) = do
-      modifyCtx (▸ CtxVar v)
+      modifyCtx @t (▸ CtxVar v)
       a ≤⋆ b
-      modifyCtx (ctxDrop (CtxVar v))
+      modifyCtx @t (ctxDrop (CtxVar v))
 
     TExists v (Fix a) ≤⋆ b = do
-      modifyCtx (▸ CtxVar v)
+      modifyCtx @t (▸ CtxVar v)
       a ≤⋆ b
-      modifyCtx (ctxDrop (CtxVar v))
+      modifyCtx @t (ctxDrop (CtxVar v))
 
     TForall v a ≤⋆ b = do
-      ma <- freshMeta (tvKind v)
+      ma <- freshMeta (Proxy @t) (tvKind v)
       let Fix a' = subst (v, Fix (TMeta ma)) a
       local @(m () -> m ())
         (\wrap act ->
            wrap $
-             modifyCtx (\c -> c ▸ CtxMarker ma ▸ CtxMeta ma) >>
+             modifyCtx @t (\c -> c ▸ CtxMarker ma ▸ CtxMeta ma) >>
              act >>
-             modifyCtx (ctxDrop (CtxMarker ma)))
+             modifyCtx @t (ctxDrop (CtxMarker ma)))
         (a' ≤⋆ b)
 
     a ≤⋆ TExists v b = do
-      mb <- freshMeta (tvKind v)
+      mb <- freshMeta (Proxy @t) (tvKind v)
       let Fix b' = subst (v, Fix (TMeta mb)) b
       local @(m () -> m ())
         (\wrap act ->
            wrap $
-             modifyCtx (\c -> c ▸ CtxMarker mb ▸ CtxMeta mb) >>
+             modifyCtx @t (\c -> c ▸ CtxMarker mb ▸ CtxMeta mb) >>
              act >>
-             modifyCtx (ctxDrop (CtxMarker mb)))
+             modifyCtx @t (ctxDrop (CtxMarker mb)))
         (a ≤⋆ b')
 
     monoA ≤⋆ monoB =
       ask @(m () -> m ()) >>= \wrapper ->
         ReaderC (\_ -> wrapper (monoA ≤· monoB))
 
-    (≤·) :: (TypeChecking sig, Carrier sig m) => TypeF Type -> TypeF Type -> m ()
+    (≤·) :: (TypeChecking t sig, Carrier sig m) => TypeF t (Type t) -> TypeF t (Type t) -> m ()
     TRef a   ≤· TRef b  | a == b = return ()
     TMeta a  ≤· TMeta b | a == b = return ()
     TCtor a  ≤· TCtor b | a == b = return ()
@@ -311,33 +319,33 @@ freshMeta k = do
       throwError $ TCError pos $ CannotUnify (Fix a) (Fix b)
 
 rewriteRow
-  :: (TypeChecking sig, Carrier sig m) =>
-     Position -> Label -> Label -> Type -> Type -> Type -> m (Type, Type, Type)
+  :: forall t sig m. (TypeChecking t sig, Carrier sig m, TypeConstructor t) =>
+     Position -> Label -> Label -> Type t -> Type t -> Type t -> m (Type t, Type t, Type t)
 rewriteRow pos newLbl lbl pty fty tail_ =
   if newLbl == lbl
   then return (pty, fty, tail_)
   else
     case tail_ of
       Fix (TMeta alpha) -> do
-        beta  <- freshMeta Row
-        gamma <- freshMeta Star
-        theta <- freshMeta Presence
-        ctx1 <- getCtx
+        beta  <- freshMeta (Proxy @t) Row
+        gamma <- freshMeta (Proxy @t) Star
+        theta <- freshMeta (Proxy @t) Presence
+        ctx1 <- getCtx @t
         case ctxHole (CtxMeta alpha) ctx1 of
           Just (l, r) -> do
-            putCtx $ l
+            putCtx @t $ l
               ▸ CtxMeta beta
               ▸ CtxMeta gamma
               ▸ CtxMeta theta
               ▸ CtxSolved alpha (Fix (TRowExtend newLbl (Fix (TMeta theta)) (Fix (TMeta gamma)) (Fix (TMeta beta))))
               <> r
-            getCtx >>= \ctx2 -> pure (Fix (TMeta theta), Fix (TMeta gamma), Fix (TRowExtend lbl (applySolutions ctx2 pty) (applySolutions ctx2 fty) (Fix (TMeta beta))))
+            getCtx @t >>= \ctx2 -> pure (Fix (TMeta theta), Fix (TMeta gamma), Fix (TRowExtend lbl (applySolutions ctx2 pty) (applySolutions ctx2 fty) (Fix (TMeta beta))))
           Nothing -> error "cannot instantiate var"
       Fix (TRowExtend lbl' pty' fty' tail') -> do
         (pty'', fty'', tail'') <- rewriteRow pos newLbl lbl' pty' fty' tail'
         getCtx >>= \ctx -> pure (pty'', fty'', Fix (TRowExtend lbl (applySolutions ctx pty) (applySolutions ctx fty) tail''))
       Fix TRowEmpty -> do
-        gamma <- freshMeta Star
+        gamma <- freshMeta (Proxy @t) Star
         pure (Fix TAbsent, Fix (TMeta gamma), Fix (TRowExtend lbl pty fty (Fix TRowEmpty)))
       _other ->
         error $ "Unexpected type: " ++ show tail_
@@ -349,15 +357,15 @@ opposite = \case
   Flex -> Rigid
   Rigid -> Flex
 
-instantiate :: forall sig m. (TypeChecking sig, Carrier sig m) => Direction -> MetaVar -> Type -> m ()
+instantiate :: forall t sig m. (TypeChecking t sig, Carrier sig m, TypeConstructor t) => Direction -> MetaVar -> Type t -> m ()
 instantiate dir0 ma0 t0 = inst dir0 ma0 t0
   where
-    inst :: (TypeChecking sig, Carrier sig m) => Direction -> MetaVar -> Type -> m ()
+    inst :: (TypeChecking t sig, Carrier sig m) => Direction -> MetaVar -> Type t -> m ()
     inst dir ma t = getCtx >>= go
       where
         -- Inst*Solve
         go ctx | True <- isMono t, Just (l, r) <- ctxHole (CtxMeta ma) ctx, Right{} <- l ⊢ t =
-          putCtx $ l ▸ CtxSolved ma t <> r
+          putCtx @t $ l ▸ CtxSolved ma t <> r
 
         -- Inst*Skolem
         go ctx | Just (l, _) <- ctxHole (CtxMeta ma) ctx, Fix (TRef tv) <- t, Left{} <- l ⊢ t = do
@@ -368,55 +376,55 @@ instantiate dir0 ma0 t0 = inst dir0 ma0 t0
 
         -- Inst*Reach
         go ctx | Fix (TMeta ma') <- t, Just (l, m, r) <- ctxHoles (CtxMeta ma) (CtxMeta ma') ctx =
-          putCtx $ l ▸ CtxMeta ma <> m ▸ CtxSolved ma' (Fix (TMeta ma)) <> r
+          putCtx @t $ l ▸ CtxMeta ma <> m ▸ CtxSolved ma' (Fix (TMeta ma)) <> r
 
         -- Inst*Arr
         go ctx | Just (l, r) <- ctxHole (CtxMeta ma) ctx, Fix (TArrow a b) <- t = do
-          ma1 <- freshMeta Star
-          ma2 <- freshMeta Star
-          putCtx $ l ▸ CtxMeta ma2 ▸ CtxMeta ma1 ▸ CtxSolved ma (Fix (TArrow (Fix (TMeta ma1)) (Fix (TMeta ma2)))) <> r
+          ma1 <- freshMeta (Proxy @t) Star
+          ma2 <- freshMeta (Proxy @t) Star
+          putCtx @t $ l ▸ CtxMeta ma2 ▸ CtxMeta ma1 ▸ CtxSolved ma (Fix (TArrow (Fix (TMeta ma1)) (Fix (TMeta ma2)))) <> r
           inst (opposite dir) ma1 a
-          getCtx >>= \ctx' -> inst dir ma2 (applySolutions ctx' b)
+          getCtx @t >>= \ctx' -> inst dir ma2 (applySolutions ctx' b)
 
         -- Inst*Kappa
         go ctx | Just (l, r) <- ctxHole (CtxMeta ma) ctx, Fix (TEArrow a b) <- t = do
-          ma1 <- freshMeta EStack
-          ma2 <- freshMeta EStar
-          putCtx $ l ▸ CtxMeta ma2 ▸ CtxMeta ma1 ▸ CtxSolved ma (Fix (TEArrow (Fix (TMeta ma1)) (Fix (TMeta ma2)))) <> r
+          ma1 <- freshMeta (Proxy @t) EStack
+          ma2 <- freshMeta (Proxy @t) EStar
+          putCtx @t $ l ▸ CtxMeta ma2 ▸ CtxMeta ma1 ▸ CtxSolved ma (Fix (TEArrow (Fix (TMeta ma1)) (Fix (TMeta ma2)))) <> r
           inst (opposite dir) ma1 a
-          getCtx >>= \ctx' -> inst dir ma2 (applySolutions ctx' b)
+          getCtx @t >>= \ctx' -> inst dir ma2 (applySolutions ctx' b)
 
         -- InstLAllR
         go ctx | Fix (TForall b s) <- t, Rigid <- dir = do
-          putCtx $ ctx ▸ CtxVar b
+          putCtx @t $ ctx ▸ CtxVar b
           inst dir ma s
-          modifyCtx (ctxDrop (CtxVar b))
+          modifyCtx @t (ctxDrop (CtxVar b))
 
         -- InstRAllL
         go ctx | Fix (TForall b s) <- t, Flex <- dir = do
-          ma' <- freshMeta (tvKind b)
-          putCtx $ ctx ▸ CtxMarker ma' ▸ CtxMeta ma'
+          ma' <- freshMeta (Proxy @t) (tvKind b)
+          putCtx @t $ ctx ▸ CtxMarker ma' ▸ CtxMeta ma'
           inst dir ma (subst (b, Fix (TMeta ma')) s)
-          modifyCtx (ctxDrop (CtxMarker ma'))
+          modifyCtx @t (ctxDrop (CtxMarker ma'))
 
         -- InstLExistsR
         go ctx | Fix (TExists b s) <- t, Rigid <- dir = do
-          ma' <- freshMeta (tvKind b)
-          putCtx $ ctx ▸ CtxMarker ma' ▸ CtxMeta ma'
+          ma' <- freshMeta (Proxy @t) (tvKind b)
+          putCtx @t $ ctx ▸ CtxMarker ma' ▸ CtxMeta ma'
           inst dir ma (subst (b, Fix (TMeta ma')) s)
-          modifyCtx (ctxDrop (CtxMarker ma'))
+          modifyCtx @t (ctxDrop (CtxMarker ma'))
 
         -- InstRExistsL
         go ctx | Fix (TExists b s) <- t, Flex <- dir = do
-          putCtx $ ctx ▸ CtxVar b
+          putCtx @t $ ctx ▸ CtxVar b
           inst dir ma s
-          modifyCtx (ctxDrop (CtxVar b))
+          modifyCtx @t (ctxDrop (CtxVar b))
 
         -- InstOther
         go ctx | Just (l, r) <- ctxHole (CtxMeta ma) ctx, Fix t' <- t = do
-          (tasks :: [(MetaVar, Type)], t'') <- runWriter $ forM t' $ \a -> do
+          (tasks :: [(MetaVar, Type t)], t'') <- runWriter $ forM t' $ \a -> do
             k <- inferKind dummyPos a
-            ma' <- freshMeta k
+            ma' <- freshMeta (Proxy @t) k
             tell [(ma', a)]
             return (Fix (TMeta ma'))
           putCtx $ foldl (▸) l (map (CtxMeta . fst) tasks) ▸ CtxSolved ma (Fix t'') <> r
@@ -427,53 +435,53 @@ instantiate dir0 ma0 t0 = inst dir0 ma0 t0
 
 ----------------------------------------------------------------------
 
-check :: (TypeChecking sig, Carrier sig m, TypePrim (Sum (Map Const p))) => Expr p -> Type -> m ()
+check :: forall t p sig m. (TypeChecking t sig, Carrier sig m, TypePrim t (Sum (Map Const p)), TypeConstructor t) => Expr t p -> Type t -> m ()
 check e (Fix (TForall v a)) = do
-  modifyCtx (▸ CtxVar v)
+  modifyCtx @t (▸ CtxVar v)
   check e a
-  modifyCtx (ctxDrop (CtxVar v))
+  modifyCtx @t (ctxDrop (CtxVar v))
 
 check e (Fix (TExists v a)) = do
-  ma' <- freshMeta (tvKind v)
-  modifyCtx $ \ctx -> ctx ▸ CtxMarker ma' ▸ CtxMeta ma'
+  ma' <- freshMeta (Proxy @t) (tvKind v)
+  modifyCtx @t $ \ctx -> ctx ▸ CtxMarker ma' ▸ CtxMeta ma'
   check e (subst (v, Fix (TMeta ma')) a)
-  modifyCtx (ctxDrop (CtxMarker ma'))
+  modifyCtx @t (ctxDrop (CtxMarker ma'))
 
 check (Fix (Lambda _ x e)) (Fix (TArrow a b)) = do
-  modifyCtx (▸ CtxAssump x a)
+  modifyCtx @t (▸ CtxAssump x a)
   check e b
-  modifyCtx (ctxDrop (CtxAssump x a))
+  modifyCtx @t (ctxDrop (CtxAssump x a))
 
 check e b = do
   a <- infer e
   local @Position (const (exprPosition e)) $
-    getCtx >>= \ctx -> applySolutions ctx a ≤ applySolutions ctx b
+    getCtx @t >>= \ctx -> applySolutions ctx a ≤ applySolutions ctx b
 
 ----------------------------------------------------------------------
 
-infer :: (TypeChecking sig, Carrier sig m, TypePrim (Sum (Map Const p))) => Expr p -> m Type
+infer :: forall t p sig m. (TypeChecking t sig, Carrier sig m, TypePrim t (Sum (Map Const p)), TypeConstructor t) => Expr t p -> m (Type t)
 infer (Fix (Ref pos x)) = do
-  ctx <- getCtx
+  ctx <- getCtx @t
   case ctxAssump ctx x of
-    Nothing -> throwError $ TCError pos $ VariableNotFound x
+    Nothing -> throwError @(TCError t) $ TCError pos $ VariableNotFound x
     Just t  -> return t
 
 infer (Fix (Annot pos e t)) = do
-  ctx <- getCtx
+  ctx <- getCtx @t
   case ctx ⊢ t of
     Left reason -> throwError $ TCError pos $ reason
     Right ()    -> check e t >> return t
 
 infer (Fix (Lambda _ x e)) = do
-  ma  <- freshMeta Star
-  ma' <- freshMeta Star
-  modifyCtx $ \c -> c ▸ CtxMarker ma ▸ CtxMeta ma ▸ CtxMeta ma' ▸ CtxAssump x (Fix (TMeta ma))
+  ma  <- freshMeta (Proxy @t) Star
+  ma' <- freshMeta (Proxy @t) Star
+  modifyCtx @t $ \c -> c ▸ CtxMarker ma ▸ CtxMeta ma ▸ CtxMeta ma' ▸ CtxAssump x (Fix (TMeta ma))
   check e (Fix (TMeta ma'))
-  ctx <- getCtx
+  ctx <- getCtx @t
   case ctxHole (CtxMarker ma) ctx of
     Just (l, r) -> do
       let tau = applySolutions r (Fix (TArrow (Fix (TMeta ma)) (Fix (TMeta ma'))))
-      putCtx l
+      putCtx @t l
       let (vars, r') = ctxUnsolved r
       pure $ foldr
         (\(MetaVar y k) -> Fix . TForall (TVar y k))
@@ -483,13 +491,13 @@ infer (Fix (Lambda _ x e)) = do
 
 infer (Fix (App _ e1 e2)) = do
   a <- infer e1
-  ctx <- getCtx
+  ctx <- getCtx @t
   inferApp (applySolutions ctx a) e2
 
 infer (Fix (Let _ x e1 e2)) = do
-  ma <- freshMeta Star
-  mb <- freshMeta Star
-  modifyCtx $ \c -> c ▸ CtxMarker ma ▸ CtxMeta ma ▸ CtxMeta mb ▸ CtxAssump x (Fix (TMeta ma))
+  ma <- freshMeta (Proxy @t) Star
+  mb <- freshMeta (Proxy @t) Star
+  modifyCtx @t $ \c -> c ▸ CtxMarker ma ▸ CtxMeta ma ▸ CtxMeta mb ▸ CtxAssump x (Fix (TMeta ma))
   check e1 (Fix (TMeta ma))
   check e2 (Fix (TMeta mb))
   return (Fix (TMeta mb))
@@ -499,22 +507,22 @@ infer (Fix (Prim _ c)) =
 
 ----------------------------------------------------------------------
 
-inferApp :: (TypeChecking sig, Carrier sig m, TypePrim (Sum (Map Const p))) => Type -> Expr p -> m Type
+inferApp :: forall t p sig m. (TypeChecking t sig, Carrier sig m, TypePrim t (Sum (Map Const p)), TypeConstructor t) => Type t -> Expr t p -> m (Type t)
 inferApp (Fix (TForall v a)) e = do
-  ma <- freshMeta (tvKind v)
-  modifyCtx (▸ CtxMeta ma)
+  ma <- freshMeta (Proxy @t) (tvKind v)
+  modifyCtx @t (▸ CtxMeta ma)
   inferApp (subst (v, Fix (TMeta ma)) a) e
 
 inferApp (Fix (TExists v a)) e = do
-  modifyCtx (▸ CtxVar v)
+  modifyCtx @t (▸ CtxVar v)
   t <- inferApp a e
-  modifyCtx (ctxDrop (CtxVar v))
+  modifyCtx @t (ctxDrop (CtxVar v))
   return t
 
 inferApp (Fix (TMeta ma)) e = do
-  ma1 <- freshMeta Star
-  ma2 <- freshMeta Star
-  ctx <- getCtx
+  ma1 <- freshMeta (Proxy @t) Star
+  ma2 <- freshMeta (Proxy @t) Star
+  ctx <- getCtx @t
   let Just (l, r) = ctxHole (CtxMeta ma) ctx
   putCtx $ l ▸ CtxMeta ma2 ▸ CtxMeta ma1 ▸ CtxSolved ma (Fix (TArrow (Fix (TMeta ma1)) (Fix (TMeta ma2)))) <> r
   check e (Fix (TMeta ma1))
@@ -525,15 +533,15 @@ inferApp (Fix (TArrow a c)) e = do
   return c
 
 inferApp t e =
-  throwError $ TCError (exprPosition e) $
+  throwError @(TCError t) $ TCError (exprPosition e) $
     OtherError $ "cannot apply to expression of type " ++ show (ppType t)
 
 ----------------------------------------------------------------------
 
-inferKind :: forall m sig. (TypeChecking sig, Carrier sig m) => Position -> Type -> m Kind
+inferKind :: forall t sig m. (TypeChecking t sig, Carrier sig m, TypeConstructor t) => Position -> Type t -> m Kind
 inferKind pos = cata (alg <=< sequence)
   where
-    alg :: TypeF Kind -> m Kind
+    alg :: TypeF t Kind -> m Kind
     alg = \case
       TRef tv              -> return (tvKind tv)
       TMeta tv             -> return (etvKind tv)
@@ -543,7 +551,7 @@ inferKind pos = cata (alg <=< sequence)
       TUnit                -> return Star
       TVoid                -> return Star
 
-      TCtor n | Just k <- lookup n kindsOfTypes -> return k
+      TCtor c              -> pure (kindOfCtor c)
       TApp (Arr a b) c | a == c -> return b
 
       TSNil                -> return EStack
@@ -562,17 +570,18 @@ inferKind pos = cata (alg <=< sequence)
 
 ----------------------------------------------------------------------
 
-type InferM = ErrorC TCError (StateC CheckState (ReaderC Position PureC))
+type InferM t = ErrorC (TCError t) (StateC (CheckState t) (ReaderC Position PureC))
 
-runInfer :: InferM a -> Either TCError a
+runInfer :: forall t a. InferM t a -> Either (TCError t) a
 runInfer = runPureC . runReader dummyPos . evalState defCheckState . runError
 
 inferExprType
-  :: forall m sig p.
-     ( TypeChecking sig
+  :: forall t m sig p.
+     ( TypeChecking t sig
      , Carrier sig m
-     , TypePrim (Sum (Map Const p))
-     ) => Expr p -> m Type
+     , TypePrim t (Sum (Map Const p))
+     , TypeConstructor t
+     ) => Expr t p -> m (Type t)
 inferExprType expr = do
   t <- infer expr
   ctx <- getCtx

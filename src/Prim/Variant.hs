@@ -41,11 +41,11 @@ instance Pretty1 VariantValue where
     VVariant lbl p ->
       ppLabel lbl <> parens (pp p)
 
-instance PrettyPrim (Const VariantPrim) where
-  prettyPrim = \case
-    Const (VariantInject lbl)  -> "VariantInject" <> angles (ppLabel lbl)
-    Const (VariantDecomp lbl)  -> "VariantDecomp" <> angles (ppLabel lbl)
-    Const VariantAbsurd        -> "VariantAbsurd"
+instance Pretty VariantPrim where
+  pretty = \case
+    VariantInject lbl -> "VariantInject" <> angles (ppLabel lbl)
+    VariantDecomp lbl -> "VariantDecomp" <> angles (ppLabel lbl)
+    VariantAbsurd     -> "VariantAbsurd"
 
 instance ( Member RuntimeErrorEffect sig
          , Carrier sig m
@@ -79,7 +79,7 @@ instance ( Member RuntimeErrorEffect sig
     where
       projVariant = project @VariantValue . unfix
 
-instance TypePrim (Const VariantPrim) where
+instance TypePrim t (Const VariantPrim) where
   typePrim = \case
     Const (VariantInject label) ->
       forall Star $ \a ->

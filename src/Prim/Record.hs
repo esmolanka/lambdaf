@@ -47,12 +47,12 @@ instance Pretty1 RecordValue where
         (mempty : repeat (comma <> space))
         (map (\(lbl, v) -> nest 4 $ vsep [ppLabel lbl <+> "=", pp v]) (M.toList x))
 
-instance PrettyPrim (Const RecordPrim) where
-  prettyPrim = \case
-    Const RecordNil           -> "RecordNil"
-    Const (RecordExtend lbl)  -> "RecordExtend" <> angles (ppLabel lbl)
-    Const (RecordSelect lbl)  -> "RecordSelect" <> angles (ppLabel lbl)
-    Const (RecordDefault lbl) -> "RecordDefault" <> angles (ppLabel lbl)
+instance Pretty RecordPrim where
+  pretty = \case
+    RecordNil         -> "RecordNil"
+    RecordExtend lbl  -> "RecordExtend" <> angles (ppLabel lbl)
+    RecordSelect lbl  -> "RecordSelect" <> angles (ppLabel lbl)
+    RecordDefault lbl -> "RecordDefault" <> angles (ppLabel lbl)
 
 instance ( Member RuntimeErrorEffect sig
          , Carrier sig m
@@ -92,7 +92,7 @@ instance ( Member RuntimeErrorEffect sig
     where
       projRecord = project @RecordValue . unfix
 
-instance TypePrim (Const RecordPrim) where
+instance TypePrim t (Const RecordPrim) where
   typePrim = \case
     Const RecordNil ->
       mono $ Fix $ TRecord $ Fix $ TRowEmpty

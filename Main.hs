@@ -43,6 +43,7 @@ import Types (Type)
 ----------------------------------------------------------------------
 -- Concrete language
 
+type TypeCtors = '[BaseType, KappaType]
 type PrimTypes = '[BasePrim, RecordPrim, VariantPrim, KappaPrim, IOPrim, LinkPrim, ExceptionPrim]
 type ValueTypes = '[LambdaValue (Eval IO), BaseValue, RecordValue, VariantValue, KappaValue]
 
@@ -67,10 +68,10 @@ runEval k = do
     Right (Left runtimeError) -> Left runtimeError
     Right (Right res) -> Right res
 
-eval' :: Expr PrimTypes -> IO (Either String (Value ValueTypes))
+eval' :: Expr TypeCtors PrimTypes -> IO (Either String (Value ValueTypes))
 eval' e = runEval (eval e)
 
-infer' :: Expr PrimTypes -> Either TCError Type
+infer' :: Expr TypeCtors PrimTypes -> Either (TCError TypeCtors) (Type TypeCtors)
 infer' a = runInfer (inferExprType a)
 
 ----------------------------------------------------------------------
@@ -112,7 +113,7 @@ main = do
          traverse (Language.SexpGrammar.fromSexp sugaredGrammar)
     of
       Left err -> die $ "parse error:\n" ++ err
-      Right s -> pure (map desugar s :: [Expr PrimTypes])
+      Right s -> pure (map desugar s :: [Expr TypeCtors PrimTypes])
 
   forM_ exprs $ \expr -> do
     unless optTypecheck $

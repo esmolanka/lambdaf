@@ -26,9 +26,9 @@ import Data.Sum
 
 import Expr
 import Eval
-import Pretty
 import Prim.Base
 import Types
+import Utils
 
 type ExceptionEffect v = Error (Value v)
 type ExceptionEffectC v = ErrorC (Value v)
@@ -40,10 +40,10 @@ data ExceptionPrim
   = RaiseExc
   | CatchExc
 
-instance PrettyPrim (Const ExceptionPrim) where
-  prettyPrim = \case
-    Const RaiseExc -> "RaiseExc"
-    Const CatchExc -> "CatchExc"
+instance Pretty ExceptionPrim where
+  pretty = \case
+    RaiseExc -> "RaiseExc"
+    CatchExc -> "CatchExc"
 
 instance ( Member (RuntimeErrorEffect) sig
          , Member (ExceptionEffect v) sig
@@ -70,7 +70,7 @@ instance ( Member (RuntimeErrorEffect) sig
       projLam :: (LambdaValue m :< v) => Value v -> Maybe (LambdaValue m (Value v))
       projLam = project @(LambdaValue m) . unfix
 
-instance TypePrim (Const ExceptionPrim) where
+instance TypePrim t (Const ExceptionPrim) where
   typePrim = \case
     Const CatchExc ->
       forall Star $ \a ->

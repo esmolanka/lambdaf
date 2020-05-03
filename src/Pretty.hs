@@ -1,3 +1,4 @@
+{-# LANGUAGE ConstraintKinds      #-}
 {-# LANGUAGE FlexibleContexts     #-}
 {-# LANGUAGE FlexibleInstances    #-}
 {-# LANGUAGE KindSignatures       #-}
@@ -12,6 +13,7 @@ module Pretty where
 
 import Control.Effect.Reader
 
+import Data.Functor.Classes
 import Data.Functor.Const
 import Data.Functor.Foldable (Fix(..), para)
 import Data.Sum
@@ -38,7 +40,6 @@ ppKind Presence = "Ψ"
 ppKind EStar    = "▴"
 ppKind EStack   = "Σ"
 
-
 ppTyVar :: TVar -> Doc ann
 ppTyVar (TVar n k) = ppPrefix k <> pretty n
   where
@@ -59,7 +60,7 @@ ppMetaVar (MetaVar n k) = ppPrefix k <> pretty n
     ppPrefix EStar    = "'β"
     ppPrefix EStack   = "'τ"
 
-ppType :: Type -> Doc ann
+ppType :: (Pretty1 (Sum (Map Const t))) => Type t -> Doc ann
 ppType = (group .) . para $ \case
   TUnit -> "()"
   TVoid -> "∅"
@@ -69,7 +70,8 @@ ppType = (group .) . para $ \case
   TEArrow (Fix TSNil,_) (_, b) -> "Dyn⟨" <> b <> "⟩"
   TEArrow (_,a) (_,b) -> "Dyn⟨" <> a <+> "⇒" <+> b <> "⟩"
 
-  TCtor name -> pretty name
+  TCtor name -> liftPretty absurd name
+
   TApp (_,a) (_,b) -> a <+> b
   TRef tv -> ppTyVar tv
   TMeta tv -> ppMetaVar tv
@@ -101,13 +103,13 @@ ppType = (group .) . para $ \case
          Fix (TRef{})    -> field <+> "|" <+> t
          Fix _           -> vsep [ field <> ",", t ]
 
-ppError :: TCError -> Doc ann
+ppError :: (Pretty1 (Sum (Map Const t)), Show1 (TypeF t)) => TCError t -> Doc ann
 ppError (TCError pos reason) =
   vsep [ pretty pos <> ": type check error:"
        , indent 2 $ ppReason reason
        ]
 
-ppReason :: Reason -> Doc ann
+ppReason :: (Pretty1 (Sum (Map Const t)), Show1 (TypeF t)) => Reason t -> Doc ann
 ppReason = \case
   CannotUnify t1 t2 -> vsep
     [ "Cannot match expected type with actual type."
@@ -135,7 +137,7 @@ ppReason = \case
   KindMismatch k1 k2 -> vsep
     [ "Kind mismatch:" <+> pretty (show k1) <+> "vs." <+> pretty (show k2)
     ]
-  IllKindedType t -> "Ill-kinded type:" <+> pretty (show t)
+  IllKindedType t -> "Ill-kinded type:" <+> pretty (liftShowsPrec showsPrec showList 0 t "")
   VariableNotFound expr -> "Variable not found:" <+> pretty (show expr)
   TypeVariableNotFound tyvar -> "Type variable escaped its scope:" <+> ppTyVar tyvar
   ImpredicativePolymoprhism t -> "Impredicative polymorphism unsupported:" <+> ppType t
@@ -147,13 +149,7 @@ ppReason = \case
 ppVariable :: Variable -> Doc ann
 ppVariable (Variable x) = pretty x
 
-class PrettyPrim (p :: * -> *) where
-  prettyPrim :: p Void -> Doc ann
-
-instance (Apply PrettyPrim ps) => PrettyPrim (Sum ps) where
-  prettyPrim = apply @PrettyPrim prettyPrim
-
-ppExpr :: forall p ann. (PrettyPrim (Sum (Map Const p))) => Expr p -> Doc ann
+ppExpr :: forall t p ann. (Apply' Pretty1 p, Apply' Pretty1 t) => Expr t p -> Doc ann
 ppExpr = run . runReader @Int 0 . para alg
   where
     parensIf :: Bool -> Doc ann -> Doc ann
@@ -162,7 +158,7 @@ ppExpr = run . runReader @Int 0 . para alg
       False -> id
 
     alg :: forall m sig. (Member (Reader Int) sig, Carrier sig m) =>
-           ExprF p (Expr p, m (Doc ann)) -> m (Doc ann)
+           ExprF t p (Expr t p, m (Doc ann)) -> m (Doc ann)
     alg = \case
       Ref _ x ->
         pure $ ppVariable x
@@ -190,12 +186,12 @@ ppExpr = run . runReader @Int 0 . para alg
         b' <- local @Int (const 0) b
         pure $ parens (b' <+> ":" <+> ppType t)
       Prim _ p ->
-        pure $ prettyPrim p
+        pure $ liftPretty absurd p
 
 ----------------------------------------------------------------------
 -- Values
 
-ppValue :: (Apply Pretty1 v) => Value v -> Doc ann
+ppValue :: (Pretty1 (Sum v)) => Value v -> Doc ann
 ppValue (Fix x) = liftPretty ppValue x
 
 ----------------------------------------------------------------------

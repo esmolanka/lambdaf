@@ -10,12 +10,14 @@
 module Utils
   ( module Utils
   , Const(..)
+  , Pretty(..)
   ) where
 
 import Data.Functor.Const
 import Data.Sum
 import Data.Text.Prettyprint.Doc as PP
 import Data.Void
+import Data.Kind
 
 type family Map (f :: * -> * -> *) (xs :: [*]) where
   Map f '[]       = '[]
@@ -33,3 +35,8 @@ class Pretty1 (f :: * -> *) where
 
 instance (Apply Pretty1 ps) => Pretty1 (Sum ps) where
   liftPretty f = apply @Pretty1 (liftPretty f)
+
+instance Pretty a => Pretty1 (Const a) where
+  liftPretty _ (Const a) = pretty a
+
+type Apply' (c :: (* -> *) -> Constraint) (t :: [*]) = c (Sum (Map Const t))

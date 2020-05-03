@@ -40,10 +40,11 @@ import Prim.Variant
 import Syntax.Sugared
 import TypeChecker
 import Types
+import Utils
 
-instance PrettyPrim (Const LinkPrim) where
-  prettyPrim = \case
-    Const Link -> "Link"
+instance Pretty LinkPrim where
+  pretty = \case
+    Link -> "Link"
 
 instance ( Member (RuntimeErrorEffect) sig
          , Member (EnvEffect v) sig
@@ -65,8 +66,8 @@ instance ( Member (RuntimeErrorEffect) sig
               src <- liftIO $ BL8.readFile (T.unpack fn)
               expr <- case Language.SexpGrammar.decodeWith sugaredGrammar (T.unpack fn) src of
                 Left err -> evalError $ "Link:\n" ++ err
-                Right sug -> pure (desugar sug :: Expr '[BasePrim, RecordPrim, VariantPrim, IOPrim, KappaPrim, LinkPrim, ExceptionPrim])
-              case runInfer (check expr (typeCtor "Double")) of
+                Right sug -> pure (desugar sug :: Expr '[BaseType, KappaType] '[BasePrim, RecordPrim, VariantPrim, IOPrim, KappaPrim, LinkPrim, ExceptionPrim])
+              case runInfer @[BaseType, KappaType] (check expr (typeCtor BTFloat)) of
                 Left tcerror -> evalError $ "Link:\n" ++ render (ppError tcerror)
                 Right _ ->
                   pure $ mkVLam @m $ \_ ->
@@ -74,11 +75,11 @@ instance ( Member (RuntimeErrorEffect) sig
 
             _ -> evalError "Link: expected Text"
 
-instance TypePrim (Const LinkPrim) where
+instance (BaseType :<< t) => TypePrim t (Const LinkPrim) where
   typePrim = \case
     Const Link ->
       forall Star $ \a ->
       mono $
-        typeCtor "Text" ~>
+        typeCtor BTText ~>
         Fix TUnit ~>
         a

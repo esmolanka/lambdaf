@@ -24,20 +24,20 @@ import Data.Sum
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 
-import Expr
 import Eval
-import Pretty
+import Expr
 import Prim.Base
 import Types
+import Utils
 
 data IOPrim
   = ReadLn
   | WriteLn
 
-instance PrettyPrim (Const IOPrim) where
-  prettyPrim = \case
-    Const ReadLn  -> "ReadLn"
-    Const WriteLn -> "WriteLn"
+instance Pretty IOPrim where
+  pretty = \case
+    ReadLn  -> "ReadLn"
+    WriteLn -> "WriteLn"
 
 instance ( Member RuntimeErrorEffect sig
          , Carrier sig m
@@ -65,11 +65,11 @@ instance ( Member RuntimeErrorEffect sig
 ioEff :: Label
 ioEff = Label (T.pack "io")
 
-instance TypePrim (Const IOPrim) where
+instance (BaseType :<< t) => TypePrim t (Const IOPrim) where
   typePrim = \case
     Const ReadLn ->
       mono $
-        Fix TUnit ~> typeCtor "Text"
+        Fix TUnit ~> typeCtor BTText
     Const WriteLn ->
       mono $
-        typeCtor "Text" ~> Fix TUnit
+        typeCtor BTText ~> Fix TUnit

@@ -19,6 +19,8 @@ module Prim.Base
   , projBase
   , BasePrim(..)
   , partialEff
+  , BaseType(..)
+  , typeListOf
   ) where
 
 import Control.Effect.Carrier
@@ -31,7 +33,6 @@ import qualified Data.Text as T
 import Data.Text.Prettyprint.Doc as PP
 
 import Expr
-import Pretty
 import Types
 import Eval
 import Utils
@@ -49,6 +50,30 @@ data BasePrim
   | MkText Text
   | MkUnit
 
+data BaseType
+  = BTFloat
+  | BTBool
+  | BTText
+  | BTList
+    deriving (Eq, Show)
+
+typeListOf :: (BaseType :<< t) => Type t -> Type t
+typeListOf a = typeCtor BTList @: a
+
+instance Pretty BaseType where
+  pretty = \case
+    BTFloat -> "Float"
+    BTBool -> "Bool"
+    BTText -> "Text"
+    BTList -> "List"
+
+instance KindOfCtor (Const BaseType) where
+  kindOfCtor = \case
+    Const BTFloat -> Star
+    Const BTBool -> Star
+    Const BTText -> Star
+    Const BTList -> Star `Arr` Star
+
 data BaseValue e
   = VFloat Double
   | VBool Bool
@@ -65,7 +90,6 @@ mkVBool x = Fix . inject $ VBool x
 mkVText :: (BaseValue :< v) => Text -> Value v
 mkVText x = Fix . inject $ VText x
 
-
 mkVList :: (BaseValue :< v) => [Value v] -> Value v
 mkVList xs = Fix . inject $ VList xs
 
@@ -77,25 +101,25 @@ projBase = project @BaseValue . unfix
 
 instance Pretty1 BaseValue where
   liftPretty pp = \case
-    VFloat x    -> pretty x
+    VFloat x  -> pretty x
     VBool x   -> pretty x
     VText x   -> pretty (show x)
     VList xs  -> list (map pp xs)
     VUnit     -> "Unit"
 
-instance PrettyPrim (Const BasePrim) where
-  prettyPrim = \case
-    Const Add          -> "Add"
-    Const If           -> "If"
-    Const ReadDouble   -> "ReadNum"
-    Const ShowDouble   -> "ShowNum"
-    Const Delay        -> "Delay"
-    Const ListNil      -> "Nil"
-    Const ListCons     -> "Cons"
-    Const (MkBool b)   -> pretty b
-    Const (MkFloat n) -> pretty n
-    Const (MkText s)   -> pretty (show s)
-    Const MkUnit       -> "Unit"
+instance Pretty BasePrim where
+  pretty = \case
+    Add         -> "Add"
+    If          -> "If"
+    ReadDouble  -> "ReadNum"
+    ShowDouble  -> "ShowNum"
+    Delay       -> "Delay"
+    ListNil     -> "Nil"
+    ListCons    -> "Cons"
+    (MkBool b)  -> pretty b
+    (MkFloat n) -> pretty n
+    (MkText s)  -> pretty (show s)
+    MkUnit      -> "Unit"
 
 instance ( Member RuntimeErrorEffect sig
          , Carrier sig m
@@ -175,21 +199,21 @@ instance ( Member RuntimeErrorEffect sig
 partialEff :: Label
 partialEff = Label (T.pack "partial")
 
-instance TypePrim (Const BasePrim) where
+instance (BaseType :<< t) => TypePrim t (Const BasePrim) where
   typePrim = \case
     Const Add ->
       mono $
-        typeCtor "Float" ~> typeCtor "Float" ~> typeCtor "Float"
+        typeCtor BTFloat ~> typeCtor BTFloat ~> typeCtor BTFloat
     Const ReadDouble ->
       mono $
-        typeCtor "Text" ~> typeCtor "Float"
+        typeCtor BTText ~> typeCtor BTFloat
     Const ShowDouble ->
       mono $
-        typeCtor "Float" ~> typeCtor "Text"
+        typeCtor BTFloat ~> typeCtor BTText
     Const If ->
       forall Star $ \a ->
       mono $
-        typeCtor "Float" ~> (Fix TUnit ~> a) ~> (Fix TUnit ~> a) ~> a
+        typeCtor BTFloat ~> (Fix TUnit ~> a) ~> (Fix TUnit ~> a) ~> a
     Const Delay ->
       forall Star $ \a ->
       mono $
@@ -202,10 +226,10 @@ instance TypePrim (Const BasePrim) where
       mono $
         a ~> typeListOf a ~> typeListOf a
     Const (MkBool _) ->
-      mono $ typeCtor "Bool"
+      mono $ typeCtor BTBool
     Const (MkFloat _) ->
-      mono $ typeCtor "Float"
+      mono $ typeCtor BTFloat
     Const (MkText _) ->
-      mono $ typeCtor "Text"
+      mono $ typeCtor BTText
     Const MkUnit ->
       mono $ Fix TUnit

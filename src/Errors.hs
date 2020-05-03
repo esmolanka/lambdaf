@@ -4,19 +4,17 @@ import Types
 import Expr
 import Syntax.Position
 
-data TCError = TCError Position Reason
-  deriving (Show)
+data TCError t = TCError Position (Reason t)
 
-data Reason
-  = CannotUnify Type Type
-  | CannotUnifyLabel Label Type Type
-  | CannotUnifyWithSkolem Type Type TVar
-  | InfiniteType Type
-  | RecursiveRowType Type
+data Reason t
+  = CannotUnify (Type t) (Type t)
+  | CannotUnifyLabel Label (Type t) (Type t)
+  | CannotUnifyWithSkolem (Type t) (Type t) TVar
+  | InfiniteType (Type t)
+  | RecursiveRowType (Type t)
   | KindMismatch Kind Kind
-  | ImpredicativePolymoprhism Type
-  | IllKindedType (TypeF Kind)
+  | ImpredicativePolymoprhism (Type t)
+  | IllKindedType (TypeF t Kind)
   | VariableNotFound Variable
   | TypeVariableNotFound TVar
   | OtherError String
-  deriving (Show)

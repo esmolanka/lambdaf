@@ -22,6 +22,10 @@ module Prim.Kappa
   , mkVAbs
   , projVal
   , projAbs
+  , KappaType(..)
+  , typeVectorOf
+  , typeTupleOf
+  , typeExprOf
   ) where
 
 import Prelude hiding ((**))
@@ -36,7 +40,6 @@ import Data.Text.Prettyprint.Doc as PP
 
 import Eval
 import Expr
-import Pretty
 import Prim.Base
 import Types
 import Utils
@@ -54,6 +57,36 @@ data KappaPrim
   | KConstNil
   | KPrim EPrim
   | KAbs
+
+data KappaType
+  = KTBool
+  | KTFloat
+  | KTVector
+  | KTTuple
+    deriving (Eq, Show)
+
+instance Pretty KappaType where
+  pretty = \case
+    KTBool -> "Bool"
+    KTFloat -> "Float"
+    KTVector -> "Vector"
+    KTTuple -> "Tuple"
+
+instance KindOfCtor (Const KappaType) where
+  kindOfCtor = \case
+    Const KTBool   -> EStar
+    Const KTFloat  -> EStar
+    Const KTVector -> EStar `Arr` EStar
+    Const KTTuple  -> EStack `Arr` EStar
+
+typeVectorOf :: (KappaType :<< t) => Type t -> Type t
+typeVectorOf a = typeCtor KTVector @: a
+
+typeTupleOf :: (KappaType :<< t) => Type t -> Type t
+typeTupleOf a = typeCtor KTTuple @: a
+
+typeExprOf :: (KappaType :<< t) => Type t -> Type t
+typeExprOf r = Fix (TEArrow (Fix TSNil) r)
 
 data KappaValue e
   = VVal EValue
@@ -76,18 +109,20 @@ projAbs v = case project @KappaValue (unfix v) of
   _ -> Nothing
 
 instance Pretty1 KappaValue where
-  liftPretty _pp = \case
+  liftPretty _ = \case
     VVal v -> ppEValue v
     VAbs f  -> ppEAbs f
 
-instance PrettyPrim (Const KappaPrim) where
-  prettyPrim = \case
-    Const KConstDbl  -> "κ/▴"
-    Const KConstVec  -> "κ/▴ⁿ"
-    Const KConstBool -> "κ/▴"
-    Const KConstNil  -> "κ/∅"
-    Const (KPrim p)  -> "κ/" <> pretty (show p)
-    Const KAbs       -> "κ"
+instance Pretty KappaPrim where
+  pretty = \case
+    KConstDbl  -> "κ/▴"
+    KConstVec  -> "κ/▴ⁿ"
+    KConstBool -> "κ/▴"
+    KConstNil  -> "κ/∅"
+    (KPrim p)  -> "κ/" <> pretty (show p)
+    KAbs       -> "κ"
+
+
 
 instance
   ( Member RuntimeErrorEffect sig
@@ -176,22 +211,22 @@ instance
                 _ -> evalError "Lambda returned not a kappa!"
           _ -> evalError "Value is not a lambda!"
 
-instance TypePrim (Const KappaPrim) where
+instance (BaseType :<< t, KappaType :<< t) => TypePrim t (Const KappaPrim) where
   typePrim = \case
     Const KConstBool ->
       mono $
-        typeCtor "Bool" ~>
-        typeExprOf (Fix (TCtor "EBool"))
+        typeCtor BTBool ~>
+        typeExprOf (typeCtor KTBool)
 
     Const KConstDbl ->
       mono $
-        typeCtor "Float" ~>
-        typeExprOf (Fix (TCtor "EFloat"))
+        typeCtor BTFloat ~>
+        typeExprOf (typeCtor KTFloat)
 
     Const KConstVec ->
       mono $
-        typeListOf (typeCtor "Float") ~>
-        typeExprOf (typeVectorOf (Fix (TCtor "EFloat")))
+        typeListOf (typeCtor BTFloat) ~>
+        typeExprOf (typeVectorOf (typeCtor KTFloat))
 
     Const KConstNil ->
       mono $
@@ -199,27 +234,27 @@ instance TypePrim (Const KappaPrim) where
 
     Const (KPrim EAdd) ->
       mono $
-        typeExprOf (Fix (TCtor "EFloat")) ~>
-        typeExprOf (Fix (TCtor "EFloat")) ~>
-        typeExprOf (Fix (TCtor "EFloat"))
+        typeExprOf (typeCtor KTFloat) ~>
+        typeExprOf (typeCtor KTFloat) ~>
+        typeExprOf (typeCtor KTFloat)
 
     Const (KPrim EMul) ->
       mono $
-        typeExprOf (Fix (TCtor "EFloat")) ~>
-        typeExprOf (Fix (TCtor "EFloat")) ~>
-        typeExprOf (Fix (TCtor "EFloat"))
+        typeExprOf (typeCtor KTFloat) ~>
+        typeExprOf (typeCtor KTFloat) ~>
+        typeExprOf (typeCtor KTFloat)
 
     Const (KPrim ESub) ->
       mono $
-        typeExprOf (Fix (TCtor "EFloat")) ~>
-        typeExprOf (Fix (TCtor "EFloat")) ~>
-        typeExprOf (Fix (TCtor "EFloat"))
+        typeExprOf (typeCtor KTFloat) ~>
+        typeExprOf (typeCtor KTFloat) ~>
+        typeExprOf (typeCtor KTFloat)
 
     Const (KPrim EDiv) ->
       mono $
-        typeExprOf (Fix (TCtor "EFloat")) ~>
-        typeExprOf (Fix (TCtor "EFloat")) ~>
-        typeExprOf (Fix (TCtor "EFloat"))
+        typeExprOf (typeCtor KTFloat) ~>
+        typeExprOf (typeCtor KTFloat) ~>
+        typeExprOf (typeCtor KTFloat)
 
     Const (KPrim ECons) ->
       forall EStar $ \a ->
@@ -263,7 +298,7 @@ instance TypePrim (Const KappaPrim) where
     Const (KPrim EBranch) ->
       forall EStar  $ \a ->
       mono $
-        typeExprOf (Fix (TCtor "EBool")) ~>
+        typeExprOf (typeCtor KTBool) ~>
         typeExprOf a ~>
         typeExprOf a ~>
         typeExprOf a

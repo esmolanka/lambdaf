@@ -33,13 +33,13 @@ import Language.SexpGrammar.Generic
 
 import Expr (Variable(..))
 import qualified Expr as Raw
-import qualified Prim.Base as Raw (BasePrim(..))
+import qualified Prim.Base as Raw (BasePrim(..), BaseType(..))
 import qualified Prim.Exception as Raw (ExceptionPrim(..))
 import qualified Prim.IO as Raw (IOPrim(..))
 import qualified Prim.Link.Types as Raw (LinkPrim(..))
 import qualified Prim.Record as Raw (RecordPrim(..))
 import qualified Prim.Variant as Raw (VariantPrim(..))
-import qualified Prim.Kappa as Raw (KappaPrim(..), EPrim(..))
+import qualified Prim.Kappa as Raw (KappaPrim(..), EPrim(..), KappaType(..))
 import qualified Syntax.Position as Raw
 import Types
 import Utils
@@ -91,7 +91,7 @@ data SugaredF e
 dsPos :: Position -> Raw.Position
 dsPos (Position fn l c) = Raw.Position (pack fn) l c l c
 
-desugar :: forall p.
+desugar :: forall t p.
   ( Raw.BasePrim :<< p
   , Raw.RecordPrim :<< p
   , Raw.VariantPrim :<< p
@@ -99,7 +99,9 @@ desugar :: forall p.
   , Raw.KappaPrim :<< p
   , Raw.LinkPrim :<< p
   , Raw.ExceptionPrim :<< p
-  ) => Sugared -> Raw.Expr p
+  , Raw.BaseType :<< t
+  , Raw.KappaType :<< t
+  ) => Sugared -> Raw.Expr t p
 desugar = resolvePrimitives . futu coalg
   where
     dummyVar = Variable "_"
@@ -115,7 +117,7 @@ desugar = resolvePrimitives . futu coalg
       Free x -> x
       Pure _ -> error "Desugaring coalgebra was not able to generate even a single layer of desugaring!"
 
-    coalg :: Sugared -> Raw.ExprF p (Free (Raw.ExprF p) Sugared)
+    coalg :: Sugared -> Raw.ExprF t p (Free (Raw.ExprF t p) Sugared)
     coalg = \case
       Fix (Var pos var) ->
         Raw.Ref (dsPos pos) var
@@ -131,7 +133,7 @@ desugar = resolvePrimitives . futu coalg
         in Raw.Let (dsPos pos) name expr
              (foldr (\(x, a) rest_ -> Free $ Raw.Let (dsPos pos) x a rest_) (Pure e) (map desugarBinding bs))
         where
-          desugarBinding :: LetBinding Sugared -> (Variable, Free (Raw.ExprF p) Sugared)
+          desugarBinding :: LetBinding Sugared -> (Variable, Free (Raw.ExprF t p) Sugared)
           desugarBinding (LetBinding n expr) = (n, Pure expr)
 
       Fix (Literal pos lit) ->
@@ -310,20 +312,22 @@ primitives _ = M.fromList
   ]
 
 resolvePrimitives ::
-  forall p.
+  forall t p.
   ( Raw.BasePrim :<< p
   , Raw.IOPrim :<< p
   , Raw.KappaPrim :<< p
   , Raw.LinkPrim :<< p
   , Raw.ExceptionPrim :<< p
-  ) => Raw.Expr p -> Raw.Expr p
+  , Raw.BaseType :<< t
+  , Raw.KappaType :<< t
+  ) => Raw.Expr t p -> Raw.Expr t p
 resolvePrimitives expr = run . runReader (primitives (Proxy @p)) $ (cata alg expr)
   where
     alg :: forall m sig r.
            ( r ~ M.Map Variable (Int, Sum' p)
            , Member (Reader r) sig
            , Carrier sig m
-           ) => Raw.ExprF p (m (Raw.Expr p)) -> m (Raw.Expr p)
+           ) => Raw.ExprF t p (m (Raw.Expr t p)) -> m (Raw.Expr t p)
     alg = \case
       Raw.Ref pos var -> do
         val <- asks @r (M.lookup var)

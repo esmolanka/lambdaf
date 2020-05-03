@@ -34,19 +34,19 @@ import Types
 newtype Variable = Variable T.Text
   deriving (Eq, Ord, Show)
 
-type Expr (p :: [*]) = Fix (ExprF p)
+type Expr (t :: [*]) (p :: [*]) = Fix (ExprF t p)
 type Value (l :: [* -> *]) = Fix (Sum l)
 
-data ExprF (p :: [*]) e
+data ExprF (t :: [*]) (p :: [*]) e
   = Ref    Position Variable
   | Lambda Position Variable e
   | App    Position e e
   | Let    Position Variable e e
-  | Annot  Position e Type
+  | Annot  Position e (Type t)
   | Prim   Position (Sum' p)
     deriving (Functor)
 
-exprPosition :: Expr p -> Position
+exprPosition :: Expr t p -> Position
 exprPosition (Fix e) = case e of
   Ref pos _  -> pos
   Lambda pos _ _ -> pos
