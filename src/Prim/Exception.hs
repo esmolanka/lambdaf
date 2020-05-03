@@ -76,7 +76,7 @@ instance TypePrim (Const ExceptionPrim) where
       forall Star $ \a ->
       forall Star $ \b ->
       mono $
-        (Fix (T TUnit) ~> a) ~>
+        (Fix TUnit ~> a) ~>
         (b ~> a) ~>
         a
     Const RaiseExc ->

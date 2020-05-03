@@ -276,7 +276,8 @@ freshMeta k = do
     TMeta ma ≤· a | not (ma `freeMetaIn` Fix a) = instantiate Rigid ma (Fix a)
     a ≤· TMeta ma | not (ma `freeMetaIn` Fix a) = instantiate Flex  ma (Fix a)
 
-    T a  ≤· T b  | a == b = pure ()
+    TUnit ≤· TUnit = pure ()
+    TVoid ≤· TVoid = pure ()
 
     TSNil ≤· TSNil = pure ()
     TSCons h t ≤· TSCons h' t' = do
@@ -539,7 +540,8 @@ inferKind pos = cata (alg <=< sequence)
       TForall _ k          -> return k
       TExists _ k          -> return k
 
-      T _                  -> return Star
+      TUnit                -> return Star
+      TVoid                -> return Star
 
       TCtor n | Just k <- lookup n kindsOfTypes -> return k
       TApp (Arr a b) c | a == c -> return b

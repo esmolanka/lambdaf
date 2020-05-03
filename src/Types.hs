@@ -16,8 +16,6 @@ module Types
   , MetaVar(..)
   , Type
   , TypeF(..)
-  , BaseType(..)
-  , EType(..)
   , Label(..)
   , getRowTail
   , TypePrim(..)
@@ -28,6 +26,7 @@ module Types
   , (~>)
   , (@:)
   , (#:)
+  , typeCtor
   , typeListOf
   , typeTupleOf
   , typeVectorOf
@@ -71,16 +70,6 @@ data MetaVar = MetaVar
   , etvKind :: Kind
   } deriving (Show, Eq, Ord)
 
-data BaseType
-  = TUnit
-  | TDouble
-  | TText
-  deriving (Show, Eq, Ord)
-
-data EType
-  = TEDouble
-  deriving (Show, Eq, Ord)
-
 type CtorName = Text
 
 type Type = Fix TypeF
@@ -94,9 +83,8 @@ data TypeF e
   | TForall TVar e         -- κ
   | TExists TVar e         -- κ
 
-  ----------------------------------------------------------------------
-  -- Base types
-  | T BaseType             -- STAR
+  | TUnit
+  | TVoid
 
   ----------------------------------------------------------------------
   -- User-defined types
@@ -183,6 +171,9 @@ infixr 5 #:
 (@:) f a = Fix (TApp f a)
 infixl 7 @:
 
+typeCtor :: Text -> Type
+typeCtor = Fix . TCtor
+
 typeVectorOf :: Type -> Type
 typeVectorOf a = (Fix (TCtor "EVec") @: a)
 
@@ -197,11 +188,14 @@ typeExprOf r = Fix (TEArrow (Fix TSNil) r)
 
 kindsOfTypes :: [(CtorName, Kind)]
 kindsOfTypes =
-  [ "List"    %:: Star `Arr` Star
-  , "Pair"    %:: Star `Arr` (Star `Arr` Star)
+  [ "Float"   %:: Star
+  , "Bool"    %:: Star
+  , "Unit"    %:: Star
+  , "Text"    %:: Star
+  , "List"    %:: Star `Arr` Star
   , "EVec"    %:: EStar `Arr` EStar
   , "ETuple"  %:: EStack `Arr` EStar
-  , "EDouble" %:: EStar
+  , "EFloat"  %:: EStar
   ]
   where
     (%::) = (,)

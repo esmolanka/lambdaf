@@ -50,6 +50,7 @@ runKappa = evalState (EState (EVar 100) id [])
 data KappaPrim
   = KConstDbl
   | KConstVec
+  | KConstBool
   | KConstNil
   | KPrim EPrim
   | KAbs
@@ -83,6 +84,7 @@ instance PrettyPrim (Const KappaPrim) where
   prettyPrim = \case
     Const KConstDbl  -> "κ/▴"
     Const KConstVec  -> "κ/▴ⁿ"
+    Const KConstBool -> "κ/▴"
     Const KConstNil  -> "κ/∅"
     Const (KPrim p)  -> "κ/" <> pretty (show p)
     Const KAbs       -> "κ"
@@ -96,17 +98,23 @@ instance
   , KappaValue :< v
   ) => EvalPrim m v (Const KappaPrim) where
   evalPrim = \case
+    Const KConstBool ->
+      pure $ mkVLam @m $ \x ->
+        case projBase x of
+          Just (VBool x') -> pure $ mkVVal (EBool x')
+          _ -> evalError "Value is not a bool!"
+
     Const KConstDbl ->
       pure $ mkVLam @m $ \x ->
         case projBase x of
-          Just (VDbl x') -> pure $ mkVVal (ELit x')
+          Just (VFloat x') -> pure $ mkVVal (ELit x')
           _ -> evalError "Value is not a double!"
 
     Const KConstVec ->
       pure $ mkVLam @m $ \xs ->
         case projBase xs of
           Just (VList xs') -> do
-            xs'' <- traverse (\x -> case projBase x of {Just (VDbl x') -> pure x'; _ -> evalError "Value is not a double!" }) xs'
+            xs'' <- traverse (\x -> case projBase x of {Just (VFloat x') -> pure x'; _ -> evalError "Value is not a double!" }) xs'
             pure $ mkVVal (EVec xs'')
           _ -> evalError "Value is not a list of doubles!"
 
@@ -139,6 +147,14 @@ instance
           Just x' -> mkVVal <$> eapply ETail [] [x']
           _ -> evalError "Wrong argument"
 
+    Const (KPrim EBranch) ->
+      pure $ mkVLam @m $ \c ->
+      pure $ mkVLam @m $ \t ->
+      pure $ mkVLam @m $ \f ->
+        case (projVal c, projVal t, projVal f) of
+          (Just c', Just t', Just f') -> mkVVal <$> eapply EBranch [] [c', t', f']
+          _ -> evalError "Wrong argument"
+
     Const (KPrim prim) ->
       pure $ mkVLam @m $ \x ->
       pure $ mkVLam @m $ \y ->
@@ -162,15 +178,20 @@ instance
 
 instance TypePrim (Const KappaPrim) where
   typePrim = \case
+    Const KConstBool ->
+      mono $
+        typeCtor "Bool" ~>
+        typeExprOf (Fix (TCtor "EBool"))
+
     Const KConstDbl ->
       mono $
-        Fix (T TDouble) ~>
-        typeExprOf (Fix (TCtor "EDouble"))
+        typeCtor "Float" ~>
+        typeExprOf (Fix (TCtor "EFloat"))
 
     Const KConstVec ->
       mono $
-        typeListOf (Fix (T TDouble)) ~>
-        typeExprOf (typeVectorOf (Fix (TCtor "EDouble")))
+        typeListOf (typeCtor "Float") ~>
+        typeExprOf (typeVectorOf (Fix (TCtor "EFloat")))
 
     Const KConstNil ->
       mono $
@@ -178,27 +199,27 @@ instance TypePrim (Const KappaPrim) where
 
     Const (KPrim EAdd) ->
       mono $
-        typeExprOf (Fix (TCtor "EDouble")) ~>
-        typeExprOf (Fix (TCtor "EDouble")) ~>
-        typeExprOf (Fix (TCtor "EDouble"))
+        typeExprOf (Fix (TCtor "EFloat")) ~>
+        typeExprOf (Fix (TCtor "EFloat")) ~>
+        typeExprOf (Fix (TCtor "EFloat"))
 
     Const (KPrim EMul) ->
       mono $
-        typeExprOf (Fix (TCtor "EDouble")) ~>
-        typeExprOf (Fix (TCtor "EDouble")) ~>
-        typeExprOf (Fix (TCtor "EDouble"))
+        typeExprOf (Fix (TCtor "EFloat")) ~>
+        typeExprOf (Fix (TCtor "EFloat")) ~>
+        typeExprOf (Fix (TCtor "EFloat"))
 
     Const (KPrim ESub) ->
       mono $
-        typeExprOf (Fix (TCtor "EDouble")) ~>
-        typeExprOf (Fix (TCtor "EDouble")) ~>
-        typeExprOf (Fix (TCtor "EDouble"))
+        typeExprOf (Fix (TCtor "EFloat")) ~>
+        typeExprOf (Fix (TCtor "EFloat")) ~>
+        typeExprOf (Fix (TCtor "EFloat"))
 
     Const (KPrim EDiv) ->
       mono $
-        typeExprOf (Fix (TCtor "EDouble")) ~>
-        typeExprOf (Fix (TCtor "EDouble")) ~>
-        typeExprOf (Fix (TCtor "EDouble"))
+        typeExprOf (Fix (TCtor "EFloat")) ~>
+        typeExprOf (Fix (TCtor "EFloat")) ~>
+        typeExprOf (Fix (TCtor "EFloat"))
 
     Const (KPrim ECons) ->
       forall EStar $ \a ->
@@ -239,6 +260,14 @@ instance TypePrim (Const KappaPrim) where
         Fix (TEArrow (a #: t) (typeTupleOf (a #: t'))) ~>
         Fix (TEArrow t (typeTupleOf t'))
 
+    Const (KPrim EBranch) ->
+      forall EStar  $ \a ->
+      mono $
+        typeExprOf (Fix (TCtor "EBool")) ~>
+        typeExprOf a ~>
+        typeExprOf a ~>
+        typeExprOf a
+
     Const KAbs ->
       forall EStar $ \a ->
       forall EStar $ \b ->
@@ -267,6 +296,7 @@ data EPrim
   | ETail
   | EFold
   | ELoop
+  | EBranch
   deriving (Show, Eq, Ord)
 
 data EExpr
@@ -280,6 +310,7 @@ data EAbs = EAbs [EVar] EExpr
 data EValue
   = ERef EVar
   | EUnit
+  | EBool Bool
   | ELit Double
   | EVec [Double]
   | ENil
@@ -299,7 +330,6 @@ ekappa body = do
     }
   var <- fresh
   body var
-
 
 eapply :: (Member KappaEffect sig, Carrier sig m) => EPrim -> [EAbs] -> [EValue] -> m EValue
 eapply p fs xs = do
@@ -327,6 +357,7 @@ ppEValue = \case
   ERef ref -> ppEVar ref
   EUnit    -> "Unit"
   ELit dbl -> pretty dbl
+  EBool b  -> pretty b
   EVec vec -> pretty vec
   ENil     -> "Nil"
 

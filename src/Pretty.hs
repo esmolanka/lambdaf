@@ -14,7 +14,6 @@ import Control.Effect.Reader
 
 import Data.Functor.Const
 import Data.Functor.Foldable (Fix(..), para)
-import Data.String
 import Data.Sum
 import Data.Text.Prettyprint.Doc as PP
 import Data.Void
@@ -53,28 +52,22 @@ ppTyVar (TVar n k) = ppPrefix k <> pretty n
 ppMetaVar :: MetaVar -> Doc ann
 ppMetaVar (MetaVar n k) = ppPrefix k <> pretty n
   where
-    ppPrefix Arr{}    = "α̂"
-    ppPrefix Star     = "α̂"
-    ppPrefix Row      = "ρ̂"
-    ppPrefix Presence = "ω̂"
-    ppPrefix EStar    = "β̂"
-    ppPrefix EStack   = "τ̂"
-
-ppBaseType :: BaseType -> Doc ann
-ppBaseType = fromString . drop 1 . show
-
-ppEType :: EType -> Doc ann
-ppEType = fromString . drop 1 . show
+    ppPrefix Arr{}    = "'α"
+    ppPrefix Star     = "'α"
+    ppPrefix Row      = "'ρ"
+    ppPrefix Presence = "'ω"
+    ppPrefix EStar    = "'β"
+    ppPrefix EStack   = "'τ"
 
 ppType :: Type -> Doc ann
 ppType = (group .) . para $ \case
-  T c -> ppBaseType c
-
+  TUnit -> "()"
+  TVoid -> "∅"
   TSNil -> "ε"
   TSCons (_,h) (_,t) -> h <+> "::" <+> t
 
-  TEArrow (Fix TSNil,_) (_, b) -> "⟨" <> b <> "⟩"
-  TEArrow (_,a) (_,b) -> "⟨" <> a <+> "⇒" <+> b <> "⟩"
+  TEArrow (Fix TSNil,_) (_, b) -> "Dyn⟨" <> b <> "⟩"
+  TEArrow (_,a) (_,b) -> "Dyn⟨" <> a <+> "⇒" <+> b <> "⟩"
 
   TCtor name -> pretty name
   TApp (_,a) (_,b) -> a <+> b
@@ -99,7 +92,7 @@ ppType = (group .) . para $ \case
           other        -> ppLabel lbl <> "^" <> ppType other
 
         field = case (f', p') of
-          (Fix (T TUnit), _) -> label
+          (Fix TUnit, _) -> label
           (_, Fix TAbsent)   -> label
           _                  -> label <+> ":" <+> f
 

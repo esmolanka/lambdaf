@@ -69,7 +69,7 @@ instance TypePrim (Const IOPrim) where
   typePrim = \case
     Const ReadLn ->
       mono $
-        Fix (T TUnit) ~> Fix (T TText)
+        Fix TUnit ~> typeCtor "Text"
     Const WriteLn ->
       mono $
-        Fix (T TText) ~> Fix (T TUnit)
+        typeCtor "Text" ~> Fix TUnit

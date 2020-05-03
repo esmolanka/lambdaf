@@ -12,9 +12,9 @@
 
 module Prim.Base
   ( BaseValue(..)
-  , mkVDbl
+  , mkVFloat
+  , mkVBool
   , mkVText
-  , mkVPair
   , mkVUnit
   , projBase
   , BasePrim(..)
@@ -44,26 +44,27 @@ data BasePrim
   | Delay
   | ListNil
   | ListCons
-  | MkPair
-  | MkDouble Double
+  | MkBool Bool
+  | MkFloat Double
   | MkText Text
   | MkUnit
 
 data BaseValue e
-  = VDbl Double
+  = VFloat Double
+  | VBool Bool
   | VText Text
-  | VPair e e
   | VList [e]
   | VUnit
 
-mkVDbl :: (BaseValue :< v) => Double -> Value v
-mkVDbl x = Fix . inject $ VDbl x
+mkVFloat :: (BaseValue :< v) => Double -> Value v
+mkVFloat x = Fix . inject $ VFloat x
+
+mkVBool :: (BaseValue :< v) => Bool -> Value v
+mkVBool x = Fix . inject $ VBool x
 
 mkVText :: (BaseValue :< v) => Text -> Value v
 mkVText x = Fix . inject $ VText x
 
-mkVPair :: (BaseValue :< v) => Value v -> Value v -> Value v
-mkVPair a b = Fix . inject $ VPair a b
 
 mkVList :: (BaseValue :< v) => [Value v] -> Value v
 mkVList xs = Fix . inject $ VList xs
@@ -76,9 +77,9 @@ projBase = project @BaseValue . unfix
 
 instance Pretty1 BaseValue where
   liftPretty pp = \case
-    VDbl x    -> pretty x
+    VFloat x    -> pretty x
+    VBool x   -> pretty x
     VText x   -> pretty (show x)
-    VPair a b -> parens (pp a <+> "**" <+> pp b)
     VList xs  -> list (map pp xs)
     VUnit     -> "Unit"
 
@@ -91,8 +92,8 @@ instance PrettyPrim (Const BasePrim) where
     Const Delay        -> "Delay"
     Const ListNil      -> "Nil"
     Const ListCons     -> "Cons"
-    Const MkPair       -> "Pair"
-    Const (MkDouble n) -> pretty n
+    Const (MkBool b)   -> pretty b
+    Const (MkFloat n) -> pretty n
     Const (MkText s)   -> pretty (show s)
     Const MkUnit       -> "Unit"
 
@@ -106,9 +107,9 @@ instance ( Member RuntimeErrorEffect sig
         pure $ mkVLam @m $ \x ->
         pure $ mkVLam @m $ \y ->
           case projBase x of
-            Just (VDbl x') ->
+            Just (VFloat x') ->
               case projBase y of
-                Just (VDbl y') -> pure $ mkVDbl (x' + y')
+                Just (VFloat y') -> pure $ mkVFloat (x' + y')
                 _ -> evalError "RHS is not a double!"
             _ -> evalError "LHS is not a double!"
 
@@ -117,14 +118,14 @@ instance ( Member RuntimeErrorEffect sig
           case projBase x of
             Just (VText x') ->
               case reads (T.unpack x') of
-                [(dbl,"")] -> pure $ mkVDbl dbl
+                [(dbl,"")] -> pure $ mkVFloat dbl
                 _          -> evalError ("Could not read double: " ++ show x')
             _ -> evalError "ReadDouble: not a string"
 
       Const ShowDouble ->
         pure $ mkVLam @m $ \x ->
           case projBase x of
-            Just (VDbl x') -> pure $ mkVText (T.pack (show x'))
+            Just (VFloat x') -> pure $ mkVText (T.pack (show x'))
             _ -> evalError "ShowDouble: not a double"
 
       Const If ->
@@ -132,7 +133,7 @@ instance ( Member RuntimeErrorEffect sig
         pure $ mkVLam @m $ \t ->
         pure $ mkVLam @m $ \f ->
           case projBase c of
-            Just (VDbl c')
+            Just (VFloat c')
               | c' > 0    -> forceDelayed t
               | otherwise -> forceDelayed f
             _ -> evalError "Condition is not a double!"
@@ -154,14 +155,11 @@ instance ( Member RuntimeErrorEffect sig
             Just (VList xs') -> pure $ mkVList (x : xs')
             _ -> evalError "Wrong arguments"
 
+      Const (MkBool b) ->
+        pure $ mkVBool b
 
-      Const MkPair ->
-        pure $ mkVLam @m $ \a ->
-        pure $ mkVLam @m $ \b ->
-          pure (mkVPair a b)
-
-      Const (MkDouble n) ->
-        pure $ mkVDbl n
+      Const (MkFloat n) ->
+        pure $ mkVFloat n
 
       Const (MkText t) ->
         pure $ mkVText t
@@ -181,21 +179,21 @@ instance TypePrim (Const BasePrim) where
   typePrim = \case
     Const Add ->
       mono $
-        Fix (T TDouble) ~> Fix (T TDouble) ~> Fix (T TDouble)
+        typeCtor "Float" ~> typeCtor "Float" ~> typeCtor "Float"
     Const ReadDouble ->
       mono $
-        Fix (T TText) ~> Fix (T TDouble)
+        typeCtor "Text" ~> typeCtor "Float"
     Const ShowDouble ->
       mono $
-        Fix (T TDouble) ~> Fix (T TText)
+        typeCtor "Float" ~> typeCtor "Text"
     Const If ->
       forall Star $ \a ->
       mono $
-        Fix (T TDouble) ~> (Fix (T TUnit) ~> a) ~> (Fix (T TUnit) ~> a) ~> a
+        typeCtor "Float" ~> (Fix TUnit ~> a) ~> (Fix TUnit ~> a) ~> a
     Const Delay ->
       forall Star $ \a ->
       mono $
-        (Fix (T TUnit) ~> a) ~> (Fix (T TUnit) ~> a)
+        (Fix TUnit ~> a) ~> (Fix TUnit ~> a)
     Const ListNil ->
       forall Star $ \a ->
       mono $ typeListOf a
@@ -203,13 +201,11 @@ instance TypePrim (Const BasePrim) where
       forall Star $ \a ->
       mono $
         a ~> typeListOf a ~> typeListOf a
-    Const MkPair ->
-      forall Star $ \a ->
-      forall Star $ \b ->
-      mono $ a ~> b ~> ((Fix (TCtor "Pair") @: a) @: b)
-    Const (MkDouble _) ->
-      mono $ Fix $ T $ TDouble
+    Const (MkBool _) ->
+      mono $ typeCtor "Bool"
+    Const (MkFloat _) ->
+      mono $ typeCtor "Float"
     Const (MkText _) ->
-      mono $ Fix $ T $ TText
+      mono $ typeCtor "Text"
     Const MkUnit ->
-      mono $ Fix $ T $ TUnit
+      mono $ Fix TUnit

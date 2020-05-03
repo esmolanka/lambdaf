@@ -66,7 +66,7 @@ instance ( Member (RuntimeErrorEffect) sig
               expr <- case Language.SexpGrammar.decodeWith sugaredGrammar (T.unpack fn) src of
                 Left err -> evalError $ "Link:\n" ++ err
                 Right sug -> pure (desugar sug :: Expr '[BasePrim, RecordPrim, VariantPrim, IOPrim, KappaPrim, LinkPrim, ExceptionPrim])
-              case runInfer (check expr (Fix (T TDouble))) of
+              case runInfer (check expr (typeCtor "Double")) of
                 Left tcerror -> evalError $ "Link:\n" ++ render (ppError tcerror)
                 Right _ ->
                   pure $ mkVLam @m $ \_ ->
@@ -79,6 +79,6 @@ instance TypePrim (Const LinkPrim) where
     Const Link ->
       forall Star $ \a ->
       mono $
-        Fix (T TText) ~>
-        Fix (T TUnit) ~>
+        typeCtor "Text" ~>
+        Fix TUnit ~>
         a

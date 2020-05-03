@@ -33,7 +33,6 @@ import Language.SexpGrammar.Generic
 
 import Expr (Variable(..))
 import qualified Expr as Raw
--- import qualified Prim.Anf as Raw (AnfPrim(..), EPrim(..))
 import qualified Prim.Base as Raw (BasePrim(..))
 import qualified Prim.Exception as Raw (ExceptionPrim(..))
 import qualified Prim.IO as Raw (IOPrim(..))
@@ -46,8 +45,9 @@ import Types
 import Utils
 
 data Literal
-  = LitDbl  Double
-  | LitStr  Text
+  = LitBool  Bool
+  | LitFloat Double
+  | LitStr   Text
   | LitUnit
     deriving (Generic)
 
@@ -136,9 +136,10 @@ desugar = resolvePrimitives . futu coalg
 
       Fix (Literal pos lit) ->
         case lit of
-          LitDbl  x -> Raw.Prim (dsPos pos) (inject' (Raw.MkDouble x))
-          LitStr  x -> Raw.Prim (dsPos pos) (inject' (Raw.MkText x))
-          LitUnit   -> Raw.Prim (dsPos pos) (inject' Raw.MkUnit)
+          LitBool  x -> Raw.Prim (dsPos pos) (inject' (Raw.MkBool x))
+          LitFloat x -> Raw.Prim (dsPos pos) (inject' (Raw.MkFloat x))
+          LitStr   x -> Raw.Prim (dsPos pos) (inject' (Raw.MkText x))
+          LitUnit    -> Raw.Prim (dsPos pos) (inject' Raw.MkUnit)
 
       Fix (If pos cond tr fls) ->
         unFree $
@@ -293,6 +294,7 @@ primitives _ = M.fromList
   , (Variable "raise",       (0, inject' Raw.RaiseExc))
 
     -- Kappa
+  , (Variable "^bool",       (0, inject' Raw.KConstBool))
   , (Variable "^dbl",        (0, inject' Raw.KConstDbl))
   , (Variable "^vec",        (0, inject' Raw.KConstVec))
   , (Variable "^add",        (0, inject' (Raw.KPrim Raw.EAdd)))
@@ -304,7 +306,7 @@ primitives _ = M.fromList
   , (Variable "^nil",        (0, inject' Raw.KConstNil))
   , (Variable "^head",       (0, inject' (Raw.KPrim Raw.EHead)))
   , (Variable "^tail",       (0, inject' (Raw.KPrim Raw.ETail)))
-  , (Variable "^fun",        (0, inject' (Raw.KAbs)))
+  , (Variable "^branch",     (0, inject' (Raw.KPrim Raw.EBranch)))
   ]
 
 resolvePrimitives ::
@@ -433,9 +435,10 @@ boolGrammar = symbol >>> partialOsi
 
 litGrammar :: Grammar Position (Sexp :- t) (Literal :- t)
 litGrammar = match
-  $ With (\litd -> double >>> litd)
-  $ With (\lits -> string  >>> lits)
-  $ With (\litu -> list id >>> litu)
+  $ With (\litb -> boolGrammar >>> litb)
+  $ With (\litf -> double      >>> litf)
+  $ With (\lits -> string      >>> lits)
+  $ With (\litu -> list id     >>> litu)
   $ End
 
 
