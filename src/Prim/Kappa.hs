@@ -6,6 +6,7 @@
 {-# LANGUAGE LambdaCase                 #-}
 {-# LANGUAGE MultiParamTypeClasses      #-}
 {-# LANGUAGE OverloadedStrings          #-}
+{-# LANGUAGE RecordWildCards            #-}
 {-# LANGUAGE ScopedTypeVariables        #-}
 {-# LANGUAGE TypeApplications           #-}
 {-# LANGUAGE TypeOperators              #-}
@@ -24,14 +25,13 @@ module Prim.Kappa
   , projAbs
   , KappaType(..)
   , typeVectorOf
-  , typeTupleOf
-  , typeExprOf
   ) where
 
 import Prelude hiding ((**))
 
 import Control.Effect.Carrier
 import Control.Effect.State
+import Control.Monad
 
 import Data.Functor.Const
 import Data.Functor.Foldable (Fix (..), unfix)
@@ -54,15 +54,16 @@ data KappaPrim
   = KConstDbl
   | KConstVec
   | KConstBool
-  | KConstNil
   | KPrim EPrim
   | KAbs
+  | KCons
+  | KFirst
+  | KRest
 
 data KappaType
   = KTBool
   | KTFloat
   | KTVector
-  | KTTuple
     deriving (Eq, Show)
 
 instance Pretty KappaType where
@@ -70,35 +71,32 @@ instance Pretty KappaType where
     KTBool -> "Bool"
     KTFloat -> "Float"
     KTVector -> "Vector"
-    KTTuple -> "Tuple"
 
 instance KindOfCtor (Const KappaType) where
   kindOfCtor = \case
     Const KTBool   -> EStar
     Const KTFloat  -> EStar
     Const KTVector -> EStar `Arr` EStar
-    Const KTTuple  -> EStack `Arr` EStar
 
 typeVectorOf :: (KappaType :<< t) => Type t -> Type t
 typeVectorOf a = typeCtor KTVector @: a
 
-typeTupleOf :: (KappaType :<< t) => Type t -> Type t
-typeTupleOf a = typeCtor KTTuple @: a
+(==>) :: (KappaType :<< t) => Type t -> Type t -> Type t
+(==>) a b = Fix (TEArrow a b)
 
-typeExprOf :: (KappaType :<< t) => Type t -> Type t
-typeExprOf r = Fix (TEArrow (Fix TSNil) r)
+infix 4 ==>
 
 data KappaValue e
-  = VVal EValue
+  = VVal [EValue]
   | VAbs EAbs
 
-mkVVal :: (KappaValue :< v) => EValue -> Value v
+mkVVal :: (KappaValue :< v) => [EValue] -> Value v
 mkVVal = Fix . inject . VVal
 
 mkVAbs :: (KappaValue :< v) => [EVar] -> EExpr -> Value v
 mkVAbs = ((Fix . inject . VAbs) .) . EAbs
 
-projVal :: (KappaValue :< v) => Value v -> Maybe EValue
+projVal :: (KappaValue :< v) => Value v -> Maybe [EValue]
 projVal v = case project @KappaValue (unfix v) of
   Just (VVal e) -> Just e
   _ -> Nothing
@@ -110,19 +108,19 @@ projAbs v = case project @KappaValue (unfix v) of
 
 instance Pretty1 KappaValue where
   liftPretty _ = \case
-    VVal v -> ppEValue v
-    VAbs f  -> ppEAbs f
+    VVal v -> braces (hsep (punctuate comma (map ppEValue v)))
+    VAbs f -> ppEAbs f
 
 instance Pretty KappaPrim where
   pretty = \case
     KConstDbl  -> "κ/▴"
     KConstVec  -> "κ/▴ⁿ"
     KConstBool -> "κ/▴"
-    KConstNil  -> "κ/∅"
     (KPrim p)  -> "κ/" <> pretty (show p)
     KAbs       -> "κ"
-
-
+    KCons      -> "κ/**"
+    KFirst     -> "κ/!"
+    KRest      -> "κ/…"
 
 instance
   ( Member RuntimeErrorEffect sig
@@ -136,13 +134,13 @@ instance
     Const KConstBool ->
       pure $ mkVLam @m $ \x ->
         case projBase x of
-          Just (VBool x') -> pure $ mkVVal (EBool x')
+          Just (VBool x') -> pure $ mkVVal [EBool x']
           _ -> evalError "Value is not a bool!"
 
     Const KConstDbl ->
       pure $ mkVLam @m $ \x ->
         case projBase x of
-          Just (VFloat x') -> pure $ mkVVal (ELit x')
+          Just (VFloat x') -> pure $ mkVVal [ELit x']
           _ -> evalError "Value is not a double!"
 
     Const KConstVec ->
@@ -150,51 +148,42 @@ instance
         case projBase xs of
           Just (VList xs') -> do
             xs'' <- traverse (\x -> case projBase x of {Just (VFloat x') -> pure x'; _ -> evalError "Value is not a double!" }) xs'
-            pure $ mkVVal (EVec xs'')
+            pure $ mkVVal [EVec xs'']
           _ -> evalError "Value is not a list of doubles!"
-
-    Const KConstNil ->
-      pure $ mkVVal ENil
 
     Const (KPrim EFold) ->
       pure $ mkVLam @m $ \f ->
-      pure $ mkVLam @m $ \x ->
-      pure $ mkVLam @m $ \y ->
-        case (projAbs f, projVal x, projVal y) of
-          (Just f', Just x', Just y') -> mkVVal <$> eapply EFold [f'] [x', y']
-          _ -> evalError "Wrong argument"
+      pure $ mkVLam @m $ \v ->
+      pure $ mkVLam @m $ \xs ->
+        case (projAbs f, projVal v, projVal xs) of
+          (Just f', Just [v'], Just xs') -> mkVVal <$> eapply EFold (length xs') [f'] (v' : xs')
+          other -> evalError $ "EFold: wrong arguments: " ++ show other
 
     Const (KPrim ELoop) ->
       pure $ mkVLam @m $ \f ->
         case projAbs f of
-          Just f' -> mkVVal <$> eapply ELoop [f'] []
-          _ -> evalError "Wrong argument"
-
-    Const (KPrim EHead) ->
-      pure $ mkVLam @m $ \x ->
-        case projVal x of
-          Just x' -> mkVVal <$> eapply EHead [] [x']
-          _ -> evalError "Wrong argument"
-
-    Const (KPrim ETail) ->
-      pure $ mkVLam @m $ \x ->
-        case projVal x of
-          Just x' -> mkVVal <$> eapply ETail [] [x']
-          _ -> evalError "Wrong argument"
+          Just f' ->
+            let coarity = go f' - 1
+                  where
+                    go (EAbs _ expr) = go' expr
+                    go' (ELet _ _ _ _ k) = go' k
+                    go' (EReturn xs) = length xs
+            in mkVVal <$> eapply ELoop coarity [f'] []
+          other -> evalError $ "ELoop: wrong argument: " ++ show other
 
     Const (KPrim EBranch) ->
       pure $ mkVLam @m $ \c ->
       pure $ mkVLam @m $ \t ->
       pure $ mkVLam @m $ \f ->
         case (projVal c, projVal t, projVal f) of
-          (Just c', Just t', Just f') -> mkVVal <$> eapply EBranch [] [c', t', f']
+          (Just [c'], Just [t'], Just [f']) -> mkVVal <$> eapply EBranch 1 [] [c', t', f']
           _ -> evalError "Wrong argument"
 
     Const (KPrim prim) ->
       pure $ mkVLam @m $ \x ->
       pure $ mkVLam @m $ \y ->
         case (projVal x, projVal y) of
-          (Just x', Just y') -> mkVVal <$> eapply prim [] [x', y']
+          (Just [x'], Just [y']) -> mkVVal <$> eapply prim 1 [] [x', y']
           _ -> evalError "Wrong argument"
 
     Const KAbs ->
@@ -202,113 +191,131 @@ instance
         case projLambda f of
           Just f' -> do
             ekappa $ \var -> do
-              res <- f' (mkVVal (ERef var))
+              res <- f' (mkVVal [ERef var])
+              prefix <- eunkappa
               case (projVal res, projAbs res) of
-                (Just res', _) -> do
-                  body <- ereturn res'
-                  pure $ mkVAbs [var] body
-                (_, Just (EAbs vars body')) -> pure $ mkVAbs (var : vars) body'
-                _ -> evalError "Lambda returned not a kappa!"
+                (Just res', Nothing) ->
+                  pure $ mkVAbs [var] (prefix $ EReturn res')
+                (Nothing, Just (EAbs vars body')) ->
+                  pure $ mkVAbs (var : vars) (prefix body')
+                _other ->
+                  evalError "Lambda returned not a kappa!"
           _ -> evalError "Value is not a lambda!"
+
+    Const KCons ->
+      pure $ mkVLam @m $ \h ->
+      pure $ mkVLam @m $ \t ->
+        case (projVal h, projVal t) of
+          (Just [h'], Just t') -> pure (mkVVal (h' : t'))
+          other -> evalError $ "ECons: wrong arguments: " ++ show other
+
+    Const KFirst ->
+      pure $ mkVLam @m $ \x ->
+        case projVal x of
+          Just (x' : _) -> pure $ mkVVal [x']
+          _ -> evalError "Not a value"
+
+    Const KRest ->
+      pure $ mkVLam @m $ \x ->
+        case projVal x of
+          Just (_ : xs) -> pure $ mkVVal xs
+          _ -> evalError "Not a value"
 
 instance (BaseType :<< t, KappaType :<< t) => TypePrim t (Const KappaPrim) where
   typePrim = \case
     Const KConstBool ->
       mono $
         typeCtor BTBool ~>
-        typeExprOf (typeCtor KTBool)
+        (nil ==> typeCtor KTBool #: nil)
 
     Const KConstDbl ->
       mono $
         typeCtor BTFloat ~>
-        typeExprOf (typeCtor KTFloat)
+        (nil ==> typeCtor KTFloat #: nil)
 
     Const KConstVec ->
       mono $
         typeListOf (typeCtor BTFloat) ~>
-        typeExprOf (typeVectorOf (typeCtor KTFloat))
-
-    Const KConstNil ->
-      mono $
-        typeExprOf (typeTupleOf (Fix TSNil))
+        (nil ==> typeVectorOf (typeCtor KTFloat) #: nil)
 
     Const (KPrim EAdd) ->
       mono $
-        typeExprOf (typeCtor KTFloat) ~>
-        typeExprOf (typeCtor KTFloat) ~>
-        typeExprOf (typeCtor KTFloat)
+        (nil ==> typeCtor KTFloat #: nil) ~>
+        (nil ==> typeCtor KTFloat #: nil) ~>
+        (nil ==> typeCtor KTFloat #: nil)
 
     Const (KPrim EMul) ->
       mono $
-        typeExprOf (typeCtor KTFloat) ~>
-        typeExprOf (typeCtor KTFloat) ~>
-        typeExprOf (typeCtor KTFloat)
+        (nil ==> typeCtor KTFloat #: nil) ~>
+        (nil ==> typeCtor KTFloat #: nil) ~>
+        (nil ==> typeCtor KTFloat #: nil)
 
     Const (KPrim ESub) ->
       mono $
-        typeExprOf (typeCtor KTFloat) ~>
-        typeExprOf (typeCtor KTFloat) ~>
-        typeExprOf (typeCtor KTFloat)
+        (nil ==> typeCtor KTFloat #: nil) ~>
+        (nil ==> typeCtor KTFloat #: nil) ~>
+        (nil ==> typeCtor KTFloat #: nil)
 
     Const (KPrim EDiv) ->
       mono $
-        typeExprOf (typeCtor KTFloat) ~>
-        typeExprOf (typeCtor KTFloat) ~>
-        typeExprOf (typeCtor KTFloat)
-
-    Const (KPrim ECons) ->
-      forall EStar $ \a ->
-      forall EStack $ \t ->
-      mono $
-        typeExprOf a ~>
-        typeExprOf (typeTupleOf t) ~>
-        typeExprOf (typeTupleOf (a #: t))
-
-    Const (KPrim EHead) ->
-      forall EStar $ \a ->
-      forall EStack $ \t ->
-      mono $
-        typeExprOf (typeTupleOf (a #: t)) ~>
-        typeExprOf a
-
-    Const (KPrim ETail) ->
-      forall EStar $ \a ->
-      forall EStack $ \t ->
-      mono $
-        typeExprOf (typeTupleOf (a #: t)) ~>
-        typeExprOf (typeTupleOf t)
+        (nil ==> typeCtor KTFloat #: nil) ~>
+        (nil ==> typeCtor KTFloat #: nil) ~>
+        (nil ==> typeCtor KTFloat #: nil)
 
     Const (KPrim EFold) ->
       forall EStar $ \a ->
-      forall EStar $ \b ->
+      forall EStack $ \t ->
       mono $
-        Fix (TEArrow (a #: b #: Fix TSNil) b) ~>
-        typeExprOf b ~>
-        typeExprOf (typeVectorOf a) ~>
-        typeExprOf b
+        (a #: t ==> t) ~>
+        (nil ==> typeVectorOf a #: nil) ~>
+        (nil ==> t) ~>
+        (nil ==> t)
 
     Const (KPrim ELoop) ->
       forall EStar  $ \a ->
+      forall EStar  $ \b ->
       forall EStack $ \t ->
-      forall EStack $ \t' ->
       mono $
-        Fix (TEArrow (a #: t) (typeTupleOf (a #: t'))) ~>
-        Fix (TEArrow t (typeTupleOf t'))
+        (a #: nil ==> a #: b #: t) ~>
+        (nil ==> b #: t)
 
     Const (KPrim EBranch) ->
       forall EStar  $ \a ->
       mono $
-        typeExprOf (typeCtor KTBool) ~>
-        typeExprOf a ~>
-        typeExprOf a ~>
-        typeExprOf a
+        (nil ==> typeCtor KTBool #: nil) ~>
+        (nil ==> a #: nil) ~>
+        (nil ==> a #: nil) ~>
+        (nil ==> a #: nil)
 
     Const KAbs ->
       forall EStar $ \a ->
-      forall EStar $ \b ->
+      forall EStack $ \t ->
+      forall EStack $ \t' ->
+      mono $
+        ((nil ==> a #: nil) ~> (t ==> t')) ~>
+        (a #: t ==> t')
+
+    Const KCons ->
+      forall EStar $ \a ->
       forall EStack $ \t ->
       mono $
-        (Fix (TEArrow (Fix TSNil) a) ~> Fix (TEArrow t b)) ~> Fix (TEArrow (a #: t) b)
+        (nil ==> a #: nil) ~>
+        (nil ==> t) ~>
+        (nil ==> a #: t)
+
+    Const KFirst ->
+      forall EStar $ \a ->
+      forall EStack $ \t ->
+      mono $
+        (nil ==> a #: t) ~>
+        (nil ==> a #: nil)
+
+    Const KRest ->
+      forall EStar $ \a ->
+      forall EStack $ \t ->
+      mono $
+        (nil ==> a #: t) ~>
+        (nil ==> t)
 
 ----------------------------------------------------------------------
 
@@ -326,17 +333,14 @@ data EPrim
   | EMul
   | ESub
   | EDiv
-  | ECons
-  | EHead
-  | ETail
   | EFold
   | ELoop
   | EBranch
   deriving (Show, Eq, Ord)
 
 data EExpr
-  = EReturn EValue
-  | ELet EVar EPrim [EAbs] [EValue] EExpr
+  = EReturn [EValue]
+  | ELet [EVar] EPrim [EAbs] [EValue] EExpr
   deriving (Show)
 
 data EAbs = EAbs [EVar] EExpr
@@ -348,7 +352,6 @@ data EValue
   | EBool Bool
   | ELit Double
   | EVec [Double]
-  | ENil
   deriving (Show)
 
 fresh :: (Member KappaEffect sig, Carrier sig m) => m EVar
@@ -364,23 +367,25 @@ ekappa body = do
     , unfocused = focused st : unfocused st
     }
   var <- fresh
+  -- traceState $ "EKAPPA"
   body var
 
-eapply :: (Member KappaEffect sig, Carrier sig m) => EPrim -> [EAbs] -> [EValue] -> m EValue
-eapply p fs xs = do
-  var <- fresh
-  let entry = ELet var p fs xs
+eapply :: (Member KappaEffect sig, Carrier sig m) => EPrim -> Int -> [EAbs] -> [EValue] -> m [EValue]
+eapply p coarity fs xs = do
+  vars <- replicateM coarity fresh
+  let entry = ELet vars p fs xs
   modify $ \st -> st { focused = focused st . entry }
-  pure (ERef var)
+  -- traceState $ "EAPPLY " ++ show p ++ " " ++ show xs ++ " " ++ show fs
+  pure (map ERef vars)
 
-ereturn :: (Member KappaEffect sig, Carrier sig m) => EValue -> m EExpr
-ereturn result = do
+eunkappa :: (Member RuntimeErrorEffect sig, Member KappaEffect sig, Carrier sig m) => m (EExpr -> EExpr)
+eunkappa = do
   expr <- gets focused
   rest <- gets unfocused
   case rest of
-    [] -> modify $ \st -> st { focused = id }
+    [] -> evalError "eunkappa: can't pop stack anymore"
     (c : cs) -> modify $ \st -> st { focused = c, unfocused = cs }
-  pure $ expr $ EReturn result
+  pure expr
 
 ----------------------------------------------------------------------
 
@@ -394,22 +399,42 @@ ppEValue = \case
   ELit dbl -> pretty dbl
   EBool b  -> pretty b
   EVec vec -> pretty vec
-  ENil     -> "Nil"
 
 ppEPrim :: EPrim -> Doc ann
 ppEPrim = pretty . show
 
 ppEAbs :: EAbs -> Doc ann
 ppEAbs (EAbs vars body) =
-  vsep [ hsep ("κ" : punctuate comma (map ppEVar vars)) <> "."
+  vsep [ ppTuple (map ppEVar vars) <+> "⇒"
        , indent 2 $ ppEExpr body
        ]
 
+ppTuple :: [Doc ann] -> Doc ann
+ppTuple [] = mempty
+ppTuple [x] = x
+ppTuple xs = tupled xs
+
 ppEExpr :: EExpr -> Doc ann
 ppEExpr = \case
-  ELet ref prim fs args rest -> vsep $
-    [ "LET" <+> ppEVar ref <+> "=" <+> ppEPrim prim <+> tupled (map ppEValue args) ] ++
+  ELet refs prim fs args rest -> vsep $
+    [ "LET" <+> ppTuple (map ppEVar refs) <+> ":=" <+> ppEPrim prim <+> ppTuple (map ppEValue args) ] ++
     map (\fun -> indent 2 $ "WITH" <+> ppEAbs fun) fs ++
     [ ppEExpr rest ]
-  EReturn val ->
-    "RETURN" <+> ppEValue val
+  EReturn vals ->
+    "RET" <+> ppTuple (map ppEValue vals)
+
+ppEState :: EState -> Doc ann
+ppEState EState{..} =
+  vsep
+    ( zipWith ppFrame [0..] (focused : unfocused) ++
+      ["======================================================================"
+      , mempty
+      ]
+    )
+  where
+    ppFrame :: Int -> (EExpr -> EExpr) -> Doc ann
+    ppFrame n e = vsep
+      [ "Frame" <+> pretty n
+      , indent 4 (ppEExpr (e (EReturn [])))
+      , "----------------------------------------------------------------------"
+      ]

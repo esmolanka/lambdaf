@@ -389,7 +389,7 @@ instantiate dir0 ma0 t0 = inst dir0 ma0 t0
         -- Inst*Kappa
         go ctx | Just (l, r) <- ctxHole (CtxMeta ma) ctx, Fix (TEArrow a b) <- t = do
           ma1 <- freshMeta (Proxy @t) EStack
-          ma2 <- freshMeta (Proxy @t) EStar
+          ma2 <- freshMeta (Proxy @t) EStack
           putCtx @t $ l ▸ CtxMeta ma2 ▸ CtxMeta ma1 ▸ CtxSolved ma (Fix (TEArrow (Fix (TMeta ma1)) (Fix (TMeta ma2)))) <> r
           inst (opposite dir) ma1 a
           getCtx @t >>= \ctx' -> inst dir ma2 (applySolutions ctx' b)
@@ -435,7 +435,17 @@ instantiate dir0 ma0 t0 = inst dir0 ma0 t0
 
 ----------------------------------------------------------------------
 
-check :: forall t p sig m. (TypeChecking t sig, Carrier sig m, TypePrim t (Sum (Map Const p)), TypeConstructor t) => Expr t p -> Type t -> m ()
+check
+  :: forall t p sig m.
+     ( TypeChecking t sig
+     , Carrier sig m
+     , TypePrim t (Sum (Map Const p))
+     , TypeConstructor t
+     )
+  => Expr t p
+  -> Type t
+  -> m ()
+
 check e (Fix (TForall v a)) = do
   modifyCtx @t (▸ CtxVar v)
   check e a
@@ -454,12 +464,22 @@ check (Fix (Lambda _ x e)) (Fix (TArrow a b)) = do
 
 check e b = do
   a <- infer e
+  void $ inferKind (exprPosition e) a
   local @Position (const (exprPosition e)) $
     getCtx @t >>= \ctx -> applySolutions ctx a ≤ applySolutions ctx b
 
 ----------------------------------------------------------------------
 
-infer :: forall t p sig m. (TypeChecking t sig, Carrier sig m, TypePrim t (Sum (Map Const p)), TypeConstructor t) => Expr t p -> m (Type t)
+infer
+  :: forall t p sig m.
+     ( TypeChecking t sig
+     , Carrier sig m
+     , TypePrim t (Sum (Map Const p))
+     , TypeConstructor t
+     )
+  => Expr t p
+  -> m (Type t)
+
 infer (Fix (Ref pos x)) = do
   ctx <- getCtx @t
   case ctxAssump ctx x of
@@ -507,7 +527,17 @@ infer (Fix (Prim _ c)) =
 
 ----------------------------------------------------------------------
 
-inferApp :: forall t p sig m. (TypeChecking t sig, Carrier sig m, TypePrim t (Sum (Map Const p)), TypeConstructor t) => Type t -> Expr t p -> m (Type t)
+inferApp
+  :: forall t p sig m.
+     ( TypeChecking t sig
+     , Carrier sig m
+     , TypePrim t (Sum (Map Const p))
+     , TypeConstructor t
+     )
+  => Type t
+  -> Expr t p
+  -> m (Type t)
+
 inferApp (Fix (TForall v a)) e = do
   ma <- freshMeta (Proxy @t) (tvKind v)
   modifyCtx @t (▸ CtxMeta ma)
@@ -543,22 +573,28 @@ inferKind pos = cata (alg <=< sequence)
   where
     alg :: TypeF t Kind -> m Kind
     alg = \case
+      -- Base
       TRef tv              -> return (tvKind tv)
       TMeta tv             -> return (etvKind tv)
       TForall _ k          -> return k
       TExists _ k          -> return k
+      TApp (Arr a b) c
+        | a == c           -> return b
 
+      -- Primitive types
+      TArrow Star Star     -> return Star
       TUnit                -> return Star
       TVoid                -> return Star
 
+      -- External type constructors
       TCtor c              -> pure (kindOfCtor c)
-      TApp (Arr a b) c | a == c -> return b
 
-      TSNil                -> return EStack
-      TSCons EStar EStack  -> return EStack
-      TEArrow EStack EStar -> return Star
+      -- Embedded language
+      TSNil                 -> return EStack
+      TSCons EStar EStack   -> return EStack
+      TEArrow EStack EStack -> return Star
 
-      TArrow Star Star     -> return Star
+      -- Row types
       TRecord Row          -> return Star
       TVariant Row         -> return Star
       TPresent             -> return Presence
@@ -566,6 +602,7 @@ inferKind pos = cata (alg <=< sequence)
       TRowEmpty            -> return Row
       TRowExtend _
         Presence Star Row  -> return Row
+
       other                -> throwError (TCError pos (IllKindedType other))
 
 ----------------------------------------------------------------------
@@ -584,16 +621,6 @@ inferExprType
      ) => Expr t p -> m (Type t)
 inferExprType expr = do
   t <- infer expr
+  void $ inferKind (exprPosition expr) t
   ctx <- getCtx
   pure (applySolutions ctx t)
-
-----------------------------------------------------------------------
-
--- (≥) :: (TypeChecking sig, Carrier sig m) => Type -> Type -> m ()
--- (≥) = flip (≤)
-
--- >>> :set -XOverloadedStrings
--- >>> runInfer $ Fix (TForall (TVar 0 Star) (Fix (TRef (TVar 0 Star)))) ≤ Fix (TExists (TVar 1 Star) (Fix (TRef (TVar 1 Star))))
--- Checking: (∀ α0. α0) ≤ (∃ α1. α1)
---
--- Right ()

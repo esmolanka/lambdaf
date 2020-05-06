@@ -35,6 +35,7 @@ module Types
   , (~>)
   , (@:)
   , (#:)
+  , nil
   , typeCtor
   ) where
 
@@ -108,7 +109,7 @@ data TypeF (p :: [*]) e
   -- Embedded language types
   | TSNil                  -- ESTACK
   | TSCons  e e            -- ESTAR -> ESTACK -> ESTACK
-  | TEArrow e e            -- ESTACK -> ESTAR -> STAR
+  | TEArrow e e            -- ESTACK -> ESTACK -> STAR
 
   deriving (Functor, Foldable, Traversable, Generic1)
 
@@ -185,6 +186,9 @@ a ~> b = Fix (TArrow a b)
 (#:) :: Type t -> Type t -> Type t
 (#:) a b = Fix (TSCons a b)
 infixr 5 #:
+
+nil :: Type t
+nil = Fix TSNil
 
 (@:) :: Type t -> Type t -> Type t
 (@:) f a = Fix (TApp f a)

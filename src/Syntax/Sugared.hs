@@ -73,7 +73,7 @@ data SugaredF e
   | Literal Position Literal
   | If      Position e e e
   | MkList  Position [e]
-  | MkTuple Position [e]
+  | MkTuple Position e e [e]
   | MkRec   Position [(Label, e)]
   | RecProj Position Label e
   | RecDef  Position Label e e
@@ -156,15 +156,15 @@ desugar = resolvePrimitives . futu coalg
             lcons x xs' = mkApp (dsPos pos) (Free $ Raw.Prim (dsPos pos) (inject' Raw.ListCons)) [Pure x, xs']
         in unFree $ foldr lcons lnil xs
 
-      Fix (MkTuple pos elems) ->
-        let primCons = Free (Raw.Prim (dsPos pos) (inject' (Raw.KPrim Raw.ECons)))
-            primNil  = Free (Raw.Prim (dsPos pos) (inject' (Raw.KConstNil)))
+      Fix (MkTuple pos a b cs) ->
+        let primCons = Free (Raw.Prim (dsPos pos) (inject' Raw.KCons))
             app f x = Free (Raw.App (dsPos pos) f x)
+            (e : es) = reverse (a : b : cs)
         in unFree $
              foldr
                (\x rest_ -> (primCons `app` Pure x) `app` rest_)
-               primNil
-               elems
+               (Pure e)
+               (reverse es)
 
       Fix (MkRec pos elems) ->
         let empty = Raw.Prim (dsPos pos) (inject' Raw.RecordNil)
@@ -304,11 +304,9 @@ primitives _ = M.fromList
   , (Variable "^sub",        (0, inject' (Raw.KPrim Raw.ESub)))
   , (Variable "^div",        (0, inject' (Raw.KPrim Raw.EDiv)))
   , (Variable "^fold",       (0, inject' (Raw.KPrim Raw.EFold)))
-  , (Variable "^cons",       (0, inject' (Raw.KPrim Raw.ECons)))
-  , (Variable "^nil",        (0, inject' Raw.KConstNil))
-  , (Variable "^head",       (0, inject' (Raw.KPrim Raw.EHead)))
-  , (Variable "^tail",       (0, inject' (Raw.KPrim Raw.ETail)))
   , (Variable "^branch",     (0, inject' (Raw.KPrim Raw.EBranch)))
+  , (Variable "^head",       (0, inject' Raw.KFirst))
+  , (Variable "^tail",       (0, inject' Raw.KRest))
   ]
 
 resolvePrimitives ::
@@ -515,6 +513,8 @@ sugaredGrammar = fixG $ match
             swap >>>
             list (
              el (sym "**") >>>
+             el sugaredGrammar >>>
+             el sugaredGrammar >>>
              rest sugaredGrammar) >>> mktuple)
 
   $ With (\mkrec ->
