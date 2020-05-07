@@ -84,7 +84,6 @@ data SugaredF e
   | Force   Position e
   | DoBlock Position [SeqBinding e]
   | Loop    Position [Variable] e
-  | Kappa   Position [Variable] e
   | Catch   Position e [VariantMatchLeg e]
     deriving (Generic)
 
@@ -237,22 +236,13 @@ desugar = resolvePrimitives . futu coalg
 
       Fix (Loop pos xs body) ->
         let primLoop = Free (Raw.Prim (dsPos pos) (inject' (Raw.KPrim Raw.ELoop)))
-            primKappa = Free (Raw.Prim (dsPos pos) (inject' Raw.KAbs))
             app f a  = Free (Raw.App (dsPos pos) f a)
             lam v b  = Free (Raw.Lambda (dsPos pos) v b)
         in unFree $
              foldr
-               (\bnd rest_ -> primLoop `app` (primKappa `app` lam bnd rest_))
+               (\bnd rest_ -> primLoop `app` lam bnd rest_)
                (Pure body)
                (reverse xs)
-
-      Fix (Kappa pos xs body) ->
-        let app f a = Free (Raw.App (dsPos pos) f a)
-            lam v b = Free (Raw.Lambda (dsPos pos) v b)
-            primKappa = Free (Raw.Prim (dsPos pos) (inject' Raw.KAbs))
-            wrap_ x rest_ = primKappa `app` lam x rest_
-        in unFree $
-             foldr wrap_ (Pure body) xs
 
       Fix (Catch pos cont handlers) ->
         let primDecomp lbl = Free (Raw.Prim (dsPos pos) (inject' (Raw.VariantDecomp lbl)))
@@ -304,6 +294,8 @@ primitives _ = M.fromList
   , (Variable "^sub",        (0, inject' (Raw.KPrim Raw.ESub)))
   , (Variable "^div",        (0, inject' (Raw.KPrim Raw.EDiv)))
   , (Variable "^fold",       (0, inject' (Raw.KPrim Raw.EFold)))
+  , (Variable "^map",        (0, inject' (Raw.KPrim Raw.EMap)))
+  , (Variable "^loop",       (0, inject' (Raw.KPrim Raw.ELoop)))
   , (Variable "^branch",     (0, inject' (Raw.KPrim Raw.EBranch)))
   , (Variable "^head",       (0, inject' Raw.KFirst))
   , (Variable "^tail",       (0, inject' Raw.KRest))
@@ -365,7 +357,7 @@ varGrammar =
   where
     parseVar :: Text -> Either Mismatch Variable
     parseVar t
-      | t `elem` ["lambda","let","if","case","catch","do","loop","kappa","=","<-","**","tt","ff"] = Left (unexpected t)
+      | t `elem` ["lambda","let","if","case","catch","do","loop","=","<-","**","tt","ff"] = Left (unexpected t)
       | Just (h, _) <- uncons t, h == ':' || isUpper h = Left (unexpected t)
       | otherwise = Right (Variable t)
 
@@ -611,16 +603,6 @@ sugaredGrammar = fixG $ match
                onTail cons >>>
                el sugaredGrammar) >>>
              loop)
-
-    $ With (\kappa ->
-             annotated "kappa expression" $
-             position >>>
-             swap >>>
-             list (
-               el (sym "kappa") >>>
-               el (list (rest varGrammar)) >>>
-               el sugaredGrammar) >>>
-             kappa)
 
     $ With (\catch_ ->
              annotated "catch expression" $

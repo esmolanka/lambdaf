@@ -23,6 +23,7 @@ module Prim.Kappa
   , mkVAbs
   , projVal
   , projAbs
+  , toEExpr
   , KappaType(..)
   , typeVectorOf
   ) where
@@ -55,7 +56,6 @@ data KappaPrim
   | KConstVec
   | KConstBool
   | KPrim EPrim
-  | KAbs
   | KCons
   | KFirst
   | KRest
@@ -64,6 +64,7 @@ data KappaType
   = KTBool
   | KTFloat
   | KTVector
+  | KTDyn
     deriving (Eq, Show)
 
 instance Pretty KappaType where
@@ -71,20 +72,21 @@ instance Pretty KappaType where
     KTBool -> "Bool"
     KTFloat -> "Float"
     KTVector -> "Vector"
+    KTDyn -> "Dyn"
 
 instance KindOfCtor (Const KappaType) where
   kindOfCtor = \case
     Const KTBool   -> EStar
     Const KTFloat  -> EStar
     Const KTVector -> EStar `Arr` EStar
+    Const KTDyn    -> EStack `Arr` Star
 
 typeVectorOf :: (KappaType :<< t) => Type t -> Type t
 typeVectorOf a = typeCtor KTVector @: a
 
-(==>) :: (KappaType :<< t) => Type t -> Type t -> Type t
-(==>) a b = Fix (TEArrow a b)
+typeDynOf :: (KappaType :<< t) => Type t -> Type t
+typeDynOf a = typeCtor KTDyn @: a
 
-infix 4 ==>
 
 data KappaValue e
   = VVal [EValue]
@@ -117,7 +119,6 @@ instance Pretty KappaPrim where
     KConstVec  -> "κ/▴ⁿ"
     KConstBool -> "κ/▴"
     (KPrim p)  -> "κ/" <> pretty (show p)
-    KAbs       -> "κ"
     KCons      -> "κ/**"
     KFirst     -> "κ/!"
     KRest      -> "κ/…"
@@ -151,25 +152,32 @@ instance
             pure $ mkVVal [EVec xs'']
           _ -> evalError "Value is not a list of doubles!"
 
+    Const (KPrim EMap) ->
+      pure $ mkVLam @m $ \f ->
+      pure $ mkVLam @m $ \v -> do
+        f' <- maybe (evalError "EMap: f") pure . projAbs =<< mkKappa [1] f
+        v' <- maybe (evalError "EMap: v") pure $ projVal v
+        mkVVal <$> eapply EMap 1 [f'] v'
+
     Const (KPrim EFold) ->
       pure $ mkVLam @m $ \f ->
-      pure $ mkVLam @m $ \v ->
       pure $ mkVLam @m $ \xs ->
-        case (projAbs f, projVal v, projVal xs) of
-          (Just f', Just [v'], Just xs') -> mkVVal <$> eapply EFold (length xs') [f'] (v' : xs')
-          other -> evalError $ "EFold: wrong arguments: " ++ show other
+      pure $ mkVLam @m $ \b -> do
+        xs' <- maybe (evalError "EFold: xs") pure $ projVal xs
+        b' <- maybe (evalError "EFold: v") pure $ projVal b
+        let n = length b'
+        f' <- maybe (evalError "EFold: f") pure . projAbs =<< mkKappa [1, n] f
+        mkVVal <$> eapply EFold n [f'] (head xs' : b')
 
     Const (KPrim ELoop) ->
-      pure $ mkVLam @m $ \f ->
-        case projAbs f of
-          Just f' ->
-            let coarity = go f' - 1
-                  where
-                    go (EAbs _ expr) = go' expr
-                    go' (ELet _ _ _ _ k) = go' k
-                    go' (EReturn xs) = length xs
-            in mkVVal <$> eapply ELoop coarity [f'] []
-          other -> evalError $ "ELoop: wrong argument: " ++ show other
+      pure $ mkVLam @m $ \f -> do
+        f' <- maybe (evalError "ELoop: f") pure . projAbs =<< mkKappa [1] f
+        let coarity = go f' - 1
+              where
+                go (EAbs _ expr) = go' expr
+                go' (ELet _ _ _ _ k) = go' k
+                go' (EReturn xs) = length xs
+        mkVVal <$> eapply ELoop coarity [f'] []
 
     Const (KPrim EBranch) ->
       pure $ mkVLam @m $ \c ->
@@ -186,22 +194,6 @@ instance
           (Just [x'], Just [y']) -> mkVVal <$> eapply prim 1 [] [x', y']
           _ -> evalError "Wrong argument"
 
-    Const KAbs ->
-      pure $ mkVLam @m $ \f ->
-        case projLambda f of
-          Just f' -> do
-            ekappa $ \var -> do
-              res <- f' (mkVVal [ERef var])
-              prefix <- eunkappa
-              case (projVal res, projAbs res) of
-                (Just res', Nothing) ->
-                  pure $ mkVAbs [var] (prefix $ EReturn res')
-                (Nothing, Just (EAbs vars body')) ->
-                  pure $ mkVAbs (var : vars) (prefix body')
-                _other ->
-                  evalError "Lambda returned not a kappa!"
-          _ -> evalError "Value is not a lambda!"
-
     Const KCons ->
       pure $ mkVLam @m $ \h ->
       pure $ mkVLam @m $ \t ->
@@ -213,109 +205,131 @@ instance
       pure $ mkVLam @m $ \x ->
         case projVal x of
           Just (x' : _) -> pure $ mkVVal [x']
-          _ -> evalError "Not a value"
+          other -> evalError $ "Not a value: " ++ show other
 
     Const KRest ->
       pure $ mkVLam @m $ \x ->
         case projVal x of
           Just (_ : xs) -> pure $ mkVVal xs
-          _ -> evalError "Not a value"
+          other -> evalError $ "Not a value: " ++ show other
+
+mkKappa
+  :: forall v sig m.
+     ( Member RuntimeErrorEffect sig
+     , Member KappaEffect sig
+     , Carrier sig m
+     , LambdaValue m :< v
+     , KappaValue :< v
+     )
+  => [Int] -> Value v -> m (Value v)
+mkKappa = go id []
+  where
+    go :: (EExpr -> EExpr) -> [EVar] -> [Int] -> Value v -> m (Value v)
+    go prefix vars [] val = do
+      val' <- maybe (evalError "A value expected") pure $ projVal val
+      pure $ mkVAbs (reverse vars) (prefix $ EReturn val')
+    go prefix vars (arity : rest) val = do
+      val' <- maybe (evalError "A lambda expected") pure $ projLambda val
+      ekappa arity $ \newvars -> do
+        res <- val' (mkVVal (map ERef newvars))
+        prefix' <- eunkappa
+        go (prefix . prefix') (reverse newvars ++ vars) rest res
 
 instance (BaseType :<< t, KappaType :<< t) => TypePrim t (Const KappaPrim) where
   typePrim = \case
     Const KConstBool ->
       mono $
         typeCtor BTBool ~>
-        (nil ==> typeCtor KTBool #: nil)
+        (typeDynOf $ typeCtor KTBool #: nil)
 
     Const KConstDbl ->
       mono $
         typeCtor BTFloat ~>
-        (nil ==> typeCtor KTFloat #: nil)
+        (typeDynOf $ typeCtor KTFloat #: nil)
 
     Const KConstVec ->
       mono $
         typeListOf (typeCtor BTFloat) ~>
-        (nil ==> typeVectorOf (typeCtor KTFloat) #: nil)
+        (typeDynOf $ typeVectorOf (typeCtor KTFloat) #: nil)
 
     Const (KPrim EAdd) ->
       mono $
-        (nil ==> typeCtor KTFloat #: nil) ~>
-        (nil ==> typeCtor KTFloat #: nil) ~>
-        (nil ==> typeCtor KTFloat #: nil)
+        (typeDynOf $ typeCtor KTFloat #: nil) ~>
+        (typeDynOf $ typeCtor KTFloat #: nil) ~>
+        (typeDynOf $ typeCtor KTFloat #: nil)
 
     Const (KPrim EMul) ->
       mono $
-        (nil ==> typeCtor KTFloat #: nil) ~>
-        (nil ==> typeCtor KTFloat #: nil) ~>
-        (nil ==> typeCtor KTFloat #: nil)
+        (typeDynOf $ typeCtor KTFloat #: nil) ~>
+        (typeDynOf $ typeCtor KTFloat #: nil) ~>
+        (typeDynOf $ typeCtor KTFloat #: nil)
 
     Const (KPrim ESub) ->
       mono $
-        (nil ==> typeCtor KTFloat #: nil) ~>
-        (nil ==> typeCtor KTFloat #: nil) ~>
-        (nil ==> typeCtor KTFloat #: nil)
+        (typeDynOf $ typeCtor KTFloat #: nil) ~>
+        (typeDynOf $ typeCtor KTFloat #: nil) ~>
+        (typeDynOf $ typeCtor KTFloat #: nil)
 
     Const (KPrim EDiv) ->
       mono $
-        (nil ==> typeCtor KTFloat #: nil) ~>
-        (nil ==> typeCtor KTFloat #: nil) ~>
-        (nil ==> typeCtor KTFloat #: nil)
+        (typeDynOf $ typeCtor KTFloat #: nil) ~>
+        (typeDynOf $ typeCtor KTFloat #: nil) ~>
+        (typeDynOf $ typeCtor KTFloat #: nil)
+
+    Const (KPrim EMap) ->
+      forall EStar $ \a ->
+      forall EStar $ \b ->
+      mono $
+        (typeDynOf (a #: nil) ~> typeDynOf (b #: nil)) ~>
+        (typeDynOf $ typeVectorOf a #: nil) ~>
+        (typeDynOf $ typeVectorOf b #: nil)
 
     Const (KPrim EFold) ->
       forall EStar $ \a ->
       forall EStack $ \t ->
       mono $
-        (a #: t ==> t) ~>
-        (nil ==> typeVectorOf a #: nil) ~>
-        (nil ==> t) ~>
-        (nil ==> t)
+        (typeDynOf (a #: nil) ~> typeDynOf t ~> typeDynOf t) ~>
+        (typeDynOf $ typeVectorOf a #: nil) ~>
+        (typeDynOf $ t) ~>
+        (typeDynOf $ t)
 
     Const (KPrim ELoop) ->
       forall EStar  $ \a ->
       forall EStar  $ \b ->
       forall EStack $ \t ->
       mono $
-        (a #: nil ==> a #: b #: t) ~>
-        (nil ==> b #: t)
+        (typeDynOf (a #: nil) ~> typeDynOf (a #: b #: t)) ~>
+        (typeDynOf $ b #: t)
 
     Const (KPrim EBranch) ->
       forall EStar  $ \a ->
       mono $
-        (nil ==> typeCtor KTBool #: nil) ~>
-        (nil ==> a #: nil) ~>
-        (nil ==> a #: nil) ~>
-        (nil ==> a #: nil)
-
-    Const KAbs ->
-      forall EStar $ \a ->
-      forall EStack $ \t ->
-      forall EStack $ \t' ->
-      mono $
-        ((nil ==> a #: nil) ~> (t ==> t')) ~>
-        (a #: t ==> t')
+        (typeDynOf $ typeCtor KTBool #: nil) ~>
+        (typeDynOf $ a #: nil) ~>
+        (typeDynOf $ a #: nil) ~>
+        (typeDynOf $ a #: nil)
 
     Const KCons ->
       forall EStar $ \a ->
       forall EStack $ \t ->
       mono $
-        (nil ==> a #: nil) ~>
-        (nil ==> t) ~>
-        (nil ==> a #: t)
+        (typeDynOf $ a #: nil) ~>
+        (typeDynOf $ t) ~>
+        (typeDynOf $ a #: t)
 
     Const KFirst ->
       forall EStar $ \a ->
       forall EStack $ \t ->
       mono $
-        (nil ==> a #: t) ~>
-        (nil ==> a #: nil)
+        (typeDynOf $ a #: t) ~>
+        (typeDynOf $ a #: nil)
 
     Const KRest ->
       forall EStar $ \a ->
       forall EStack $ \t ->
       mono $
-        (nil ==> a #: t) ~>
-        (nil ==> t)
+        (typeDynOf $ a #: t) ~>
+        (typeDynOf $ t)
 
 ----------------------------------------------------------------------
 
@@ -334,6 +348,7 @@ data EPrim
   | ESub
   | EDiv
   | EFold
+  | EMap
   | ELoop
   | EBranch
   deriving (Show, Eq, Ord)
@@ -360,15 +375,15 @@ fresh = do
   modify (\st -> let EVar n = freshVar st in st { freshVar = EVar (succ n) })
   return x
 
-ekappa :: (Member KappaEffect sig, Carrier sig m) => (EVar -> m a) -> m a
-ekappa body = do
+ekappa :: (Member KappaEffect sig, Carrier sig m) => Int -> ([EVar] -> m a) -> m a
+ekappa arity body = do
   modify $ \st -> st
     { focused   = id
     , unfocused = focused st : unfocused st
     }
-  var <- fresh
+  vars <- replicateM arity fresh
   -- traceState $ "EKAPPA"
-  body var
+  body vars
 
 eapply :: (Member KappaEffect sig, Carrier sig m) => EPrim -> Int -> [EAbs] -> [EValue] -> m [EValue]
 eapply p coarity fs xs = do
@@ -386,6 +401,11 @@ eunkappa = do
     [] -> evalError "eunkappa: can't pop stack anymore"
     (c : cs) -> modify $ \st -> st { focused = c, unfocused = cs }
   pure expr
+
+toEExpr :: (Member RuntimeErrorEffect sig, Member KappaEffect sig, Carrier sig m) => [EValue] -> m EExpr
+toEExpr values = do
+  expr <- gets focused
+  pure $ expr (EReturn values)
 
 ----------------------------------------------------------------------
 
@@ -410,7 +430,7 @@ ppEAbs (EAbs vars body) =
        ]
 
 ppTuple :: [Doc ann] -> Doc ann
-ppTuple [] = mempty
+ppTuple [] = "∅"
 ppTuple [x] = x
 ppTuple xs = tupled xs
 
@@ -423,8 +443,8 @@ ppEExpr = \case
   EReturn vals ->
     "RET" <+> ppTuple (map ppEValue vals)
 
-ppEState :: EState -> Doc ann
-ppEState EState{..} =
+_ppEState :: EState -> Doc ann
+_ppEState EState{..} =
   vsep
     ( zipWith ppFrame [0..] (focused : unfocused) ++
       ["======================================================================"

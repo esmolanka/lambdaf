@@ -109,7 +109,6 @@ data TypeF (p :: [*]) e
   -- Embedded language types
   | TSNil                  -- ESTACK
   | TSCons  e e            -- ESTAR -> ESTACK -> ESTACK
-  | TEArrow e e            -- ESTACK -> ESTACK -> STAR
 
   deriving (Functor, Foldable, Traversable, Generic1)
 

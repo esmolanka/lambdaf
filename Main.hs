@@ -69,7 +69,11 @@ runEval k = do
     Right (Right res) -> Right res
 
 eval' :: Expr TypeCtors PrimTypes -> IO (Either String (Value ValueTypes))
-eval' e = runEval (eval e)
+eval' e = runEval $ do
+  r <- eval e
+  case projVal r of
+    Just vals -> mkVAbs [] <$> toEExpr vals
+    _other -> pure r
 
 infer' :: Expr TypeCtors PrimTypes -> Either (TCError TypeCtors) (Type TypeCtors)
 infer' a = runInfer (inferExprType a)

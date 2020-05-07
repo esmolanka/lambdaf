@@ -291,9 +291,6 @@ freshMeta _ k = do
     TSCons h t ≤· TSCons h' t' = do
       h ≤ h'
       getCtx >>= \ctx -> applySolutions ctx t ≤ applySolutions ctx t'
-    TEArrow a b ≤· TEArrow a' b' = do
-      a' ≤ a -- contravariant
-      getCtx >>= \ctx -> applySolutions ctx b ≤ applySolutions ctx b'
 
     TRecord a ≤· TRecord a' = a ≤ a'
     TVariant a ≤· TVariant a' = a ≤ a'
@@ -383,14 +380,6 @@ instantiate dir0 ma0 t0 = inst dir0 ma0 t0
           ma1 <- freshMeta (Proxy @t) Star
           ma2 <- freshMeta (Proxy @t) Star
           putCtx @t $ l ▸ CtxMeta ma2 ▸ CtxMeta ma1 ▸ CtxSolved ma (Fix (TArrow (Fix (TMeta ma1)) (Fix (TMeta ma2)))) <> r
-          inst (opposite dir) ma1 a
-          getCtx @t >>= \ctx' -> inst dir ma2 (applySolutions ctx' b)
-
-        -- Inst*Kappa
-        go ctx | Just (l, r) <- ctxHole (CtxMeta ma) ctx, Fix (TEArrow a b) <- t = do
-          ma1 <- freshMeta (Proxy @t) EStack
-          ma2 <- freshMeta (Proxy @t) EStack
-          putCtx @t $ l ▸ CtxMeta ma2 ▸ CtxMeta ma1 ▸ CtxSolved ma (Fix (TEArrow (Fix (TMeta ma1)) (Fix (TMeta ma2)))) <> r
           inst (opposite dir) ma1 a
           getCtx @t >>= \ctx' -> inst dir ma2 (applySolutions ctx' b)
 
@@ -592,7 +581,6 @@ inferKind pos = cata (alg <=< sequence)
       -- Embedded language
       TSNil                 -> return EStack
       TSCons EStar EStack   -> return EStack
-      TEArrow EStack EStack -> return Star
 
       -- Row types
       TRecord Row          -> return Star

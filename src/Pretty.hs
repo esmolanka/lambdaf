@@ -67,12 +67,12 @@ ppType = (group .) . para $ \case
   TSNil -> "ε"
   TSCons (_,h) (_,t) -> h <+> "::" <+> t
 
-  TEArrow (Fix TSNil,_) (_, b) -> "Dyn⟨" <> b <> "⟩"
-  TEArrow (_,a) (_,b) -> "Dyn⟨" <> a <+> "⇒" <+> b <> "⟩"
-
   TCtor name -> liftPretty absurd name
 
+  TApp (_,a) (Fix TSCons{}, b) -> a <> "⟨" <> b <> "⟩"
+  TApp (_,a) (Fix TSNil{}, b) -> a <> "⟨" <> b <> "⟩"
   TApp (_,a) (_,b) -> a <+> b
+
   TRef tv -> ppTyVar tv
   TMeta tv -> ppMetaVar tv
   TForall tv (_,e) -> parens ("∀" <+> ppTyVar tv <> "." <+> e)
@@ -138,7 +138,7 @@ ppReason = \case
     [ "Kind mismatch:" <+> pretty (show k1) <+> "vs." <+> pretty (show k2)
     ]
   IllKindedType t -> "Ill-kinded type:" <+> pretty (liftShowsPrec showsPrec showList 0 t "")
-  VariableNotFound expr -> "Variable not found:" <+> pretty (show expr)
+  VariableNotFound var -> "Variable not found:" <+> squotes (ppVariable var)
   TypeVariableNotFound tyvar -> "Type variable escaped its scope:" <+> ppTyVar tyvar
   ImpredicativePolymoprhism t -> "Impredicative polymorphism unsupported:" <+> ppType t
   OtherError msg -> pretty msg
