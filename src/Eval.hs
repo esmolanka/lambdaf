@@ -26,7 +26,9 @@ module Eval
   , eval
   ) where
 
+import Control.Monad (join)
 import Control.Effect.Error
+import Control.Effect.Fail
 import Control.Effect.Reader
 
 import Data.Functor.Const
@@ -41,13 +43,13 @@ import Utils
 
 newtype RuntimeError = RuntimeError String
 type RuntimeErrorEffect = Error RuntimeError
-type RuntimeErrorEffectC = ErrorC RuntimeError
+type RuntimeErrorEffectC m = ErrorC RuntimeError (FailC m)
 
 evalError :: (Member RuntimeErrorEffect sig, Carrier sig m) => String -> m a
 evalError = throwError . RuntimeError . ("Runtime error: " ++)
 
 runRuntimeError :: (Monad m) => RuntimeErrorEffectC m a -> m (Either String a)
-runRuntimeError = fmap coerce . runError
+runRuntimeError = fmap (join . coerce) . runFail . runError
 
 newtype Env v = Env (M.Map Variable (Value v))
 type EnvEffect v = Reader (Env v)
@@ -72,7 +74,7 @@ instance (Apply (EvalPrim m v) ps) => EvalPrim m v (Sum ps) where
   evalPrim = apply @(EvalPrim m v) evalPrim
 
 eval :: forall m sig (t :: [*]) (p :: [*]) (v :: [* -> *]).
-  ( Member (RuntimeErrorEffect) sig
+  ( Member RuntimeErrorEffect sig
   , Member (EnvEffect v) sig
   , Carrier sig m
   , EvalPrim m v (Sum (Map Const p))

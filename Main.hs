@@ -14,9 +14,9 @@ import System.Exit
 import Control.Effect
 import Control.Effect.Carrier
 import Control.Effect.Error
-import Control.Effect.Reader
 import Control.Monad (unless, forM_)
 import Control.Monad.IO.Class
+import Control.Monad.Fail (MonadFail)
 
 import qualified Data.ByteString.Lazy.Char8 as B8
 import Data.Text.Prettyprint.Doc
@@ -43,16 +43,17 @@ import Types (Type)
 ----------------------------------------------------------------------
 -- Concrete language
 
-type TypeCtors = '[BaseType, KappaType]
-type PrimTypes = '[BasePrim, RecordPrim, VariantPrim, KappaPrim, IOPrim, LinkPrim, ExceptionPrim]
+type TypeCtors  = '[BaseType, KappaType]
+type PrimTypes  = '[BasePrim, RecordPrim, VariantPrim, KappaPrim, IOPrim, LinkPrim, ExceptionPrim]
 type ValueTypes = '[LambdaValue (Eval IO), BaseValue, RecordValue, VariantValue, KappaValue]
 
 newtype Eval m a = Eval
   { unEval :: RuntimeErrorEffectC (ExceptionEffectC ValueTypes (EnvEffectC ValueTypes (KappaEffectC (LiftC m)))) a
-  } deriving (Functor, Applicative, Monad, MonadIO)
+  } deriving (Functor, Applicative, Monad, MonadIO, MonadFail)
 
 instance (MonadIO m) => Carrier
     ( RuntimeErrorEffect
+      :+: Fail
       :+: ExceptionEffect ValueTypes
       :+: EnvEffect ValueTypes
       :+: KappaEffect

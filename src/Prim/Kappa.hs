@@ -31,6 +31,7 @@ module Prim.Kappa
 import Prelude hiding ((**))
 
 import Control.Effect.Carrier
+import Control.Effect.Fail
 import Control.Effect.State
 import Control.Monad
 
@@ -87,7 +88,6 @@ typeVectorOf a = typeCtor KTVector @: a
 typeDynOf :: (KappaType :<< t) => Type t -> Type t
 typeDynOf a = typeCtor KTDyn @: a
 
-
 data KappaValue e
   = VVal [EValue]
   | VAbs EAbs
@@ -124,7 +124,8 @@ instance Pretty KappaPrim where
     KRest      -> "κ/…"
 
 instance
-  ( Member RuntimeErrorEffect sig
+  ( MonadFail m
+  , Member RuntimeErrorEffect sig
   , Member KappaEffect sig
   , Carrier sig m
   , LambdaValue m :< v
@@ -133,45 +134,43 @@ instance
   ) => EvalPrim m v (Const KappaPrim) where
   evalPrim = \case
     Const KConstBool ->
-      pure $ mkVLam @m $ \x ->
-        case projBase x of
-          Just (VBool x') -> pure $ mkVVal [EBool x']
-          _ -> evalError "Value is not a bool!"
+      pure $ mkVLam @m $ \x -> do
+        Just (VBool x') <- pure $ projBase x
+        pure $ mkVVal [EBool x']
 
     Const KConstDbl ->
-      pure $ mkVLam @m $ \x ->
-        case projBase x of
-          Just (VFloat x') -> pure $ mkVVal [ELit x']
-          _ -> evalError "Value is not a double!"
+      pure $ mkVLam @m $ \x -> do
+        Just (VFloat x') <- pure $ projBase x
+        pure $ mkVVal [ELit x']
 
     Const KConstVec ->
-      pure $ mkVLam @m $ \xs ->
-        case projBase xs of
-          Just (VList xs') -> do
-            xs'' <- traverse (\x -> case projBase x of {Just (VFloat x') -> pure x'; _ -> evalError "Value is not a double!" }) xs'
-            pure $ mkVVal [EVec xs'']
-          _ -> evalError "Value is not a list of doubles!"
+      pure $ mkVLam @m $ \xs -> do
+        Just (VList xs') <- pure $ projBase xs
+        xs'' <- forM xs' $ \x -> do
+          Just (VFloat x') <- pure (projBase x)
+          pure x'
+        pure $ mkVVal [EVec xs'']
 
     Const (KPrim EMap) ->
       pure $ mkVLam @m $ \f ->
       pure $ mkVLam @m $ \v -> do
-        f' <- maybe (evalError "EMap: f") pure . projAbs =<< mkKappa [1] f
-        v' <- maybe (evalError "EMap: v") pure $ projVal v
+        Just f' <- projAbs <$> mkKappa [1] f
+        Just v' <- pure $ projVal v
         mkVVal <$> eapply EMap 1 [f'] v'
 
     Const (KPrim EFold) ->
       pure $ mkVLam @m $ \f ->
       pure $ mkVLam @m $ \xs ->
       pure $ mkVLam @m $ \b -> do
-        xs' <- maybe (evalError "EFold: xs") pure $ projVal xs
-        b' <- maybe (evalError "EFold: v") pure $ projVal b
+        Just [xs'] <- pure $ projVal xs
+        Just b' <- pure $ projVal b
         let n = length b'
-        f' <- maybe (evalError "EFold: f") pure . projAbs =<< mkKappa [1, n] f
-        mkVVal <$> eapply EFold n [f'] (head xs' : b')
+        Just f' <- pure . projAbs =<< mkKappa [1, n] f
+        mkVVal <$> eapply EFold n [f'] (xs' : b')
 
     Const (KPrim ELoop) ->
       pure $ mkVLam @m $ \f -> do
-        f' <- maybe (evalError "ELoop: f") pure . projAbs =<< mkKappa [1] f
+        Just f' <- projAbs <$> mkKappa [1] f
         let coarity = go f' - 1
               where
                 go (EAbs _ expr) = go' expr
@@ -182,36 +181,35 @@ instance
     Const (KPrim EBranch) ->
       pure $ mkVLam @m $ \c ->
       pure $ mkVLam @m $ \t ->
-      pure $ mkVLam @m $ \f ->
-        case (projVal c, projVal t, projVal f) of
-          (Just [c'], Just [t'], Just [f']) -> mkVVal <$> eapply EBranch 1 [] [c', t', f']
-          _ -> evalError "Wrong argument"
+      pure $ mkVLam @m $ \f -> do
+        [c'] <- maybe (evalError "EBranch: c") pure $ projVal c
+        [t'] <- maybe (evalError "EBranch: c") pure $ projVal t
+        [f'] <- maybe (evalError "EBranch: c") pure $ projVal f
+        mkVVal <$> eapply EBranch 1 [] [c', t', f']
 
     Const (KPrim prim) ->
       pure $ mkVLam @m $ \x ->
-      pure $ mkVLam @m $ \y ->
-        case (projVal x, projVal y) of
-          (Just [x'], Just [y']) -> mkVVal <$> eapply prim 1 [] [x', y']
-          _ -> evalError "Wrong argument"
+      pure $ mkVLam @m $ \y -> do
+        Just [x'] <- pure $ projVal x
+        Just [y'] <- pure $ projVal y
+        mkVVal <$> eapply prim 1 [] [x', y']
 
     Const KCons ->
       pure $ mkVLam @m $ \h ->
-      pure $ mkVLam @m $ \t ->
-        case (projVal h, projVal t) of
-          (Just [h'], Just t') -> pure (mkVVal (h' : t'))
-          other -> evalError $ "ECons: wrong arguments: " ++ show other
+      pure $ mkVLam @m $ \t -> do
+      Just [h'] <- pure $ projVal h
+      Just t'   <- pure $ projVal t
+      pure (mkVVal (h' : t'))
 
     Const KFirst ->
-      pure $ mkVLam @m $ \x ->
-        case projVal x of
-          Just (x' : _) -> pure $ mkVVal [x']
-          other -> evalError $ "Not a value: " ++ show other
+      pure $ mkVLam @m $ \x -> do
+        Just (x' : _) <- pure $ projVal x
+        pure $ mkVVal [x']
 
     Const KRest ->
-      pure $ mkVLam @m $ \x ->
-        case projVal x of
-          Just (_ : xs) -> pure $ mkVVal xs
-          other -> evalError $ "Not a value: " ++ show other
+      pure $ mkVLam @m $ \x -> do
+        Just (_ : xs) <- pure $ projVal x
+        pure $ mkVVal xs
 
 mkKappa
   :: forall v sig m.

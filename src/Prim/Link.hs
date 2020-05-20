@@ -17,6 +17,7 @@ module Prim.Link
   ) where
 
 import Control.Effect.Carrier
+import Control.Effect.Fail
 import Control.Monad.IO.Class
 
 import qualified Data.ByteString.Lazy.Char8 as BL8
@@ -46,7 +47,8 @@ instance Pretty LinkPrim where
   pretty = \case
     Link -> "Link"
 
-instance ( Member (RuntimeErrorEffect) sig
+instance ( MonadFail m
+         , Member (RuntimeErrorEffect) sig
          , Member (EnvEffect v) sig
          , Member (ExceptionEffect v) sig
          , Member (KappaEffect) sig
