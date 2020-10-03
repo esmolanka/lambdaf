@@ -32,6 +32,8 @@ let
       haskellPackages = pkgs.haskell.packages.${compiler}.override {
         overrides = new: old: {
           lambdaf = mkCabalPackage new gitignored "lambdaf" ./.;
+          invertible-grammar = mkCabalPackage new gitignored "invertible-grammar" ./sexp-grammar/invertible-grammar;
+          sexp-grammar = mkCabalPackage new gitignored "sexp-grammar" ./sexp-grammar/sexp-grammar;
         };
       };
     };

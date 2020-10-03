@@ -1,0 +1,10 @@
+packages:
+  ./lambdaf.cabal
+
+----------------------------------------------------------------------
+-- Either Nix or:
+
+-- pacakages:
+--  ./lambdaf.cabal
+--  sexp-grammar/invertible-grammar/invertible-grammar.cabal
+--  sexp-grammar/sexp-grammar/sexp-grammar.cabal
