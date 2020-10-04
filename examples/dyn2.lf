@@ -1,0 +1,5 @@
+(do
+  {param <- (new-global 2)}
+  {x₀ <- (ask param)}
+  {x₁ <- (with param 10 `(+ x₀ (ask param)))}
+  (+ x₁ x₀))

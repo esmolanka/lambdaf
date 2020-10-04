@@ -22,6 +22,7 @@ library
     Eval
     Pretty
     Prim.Base
+    Prim.Dyn
     Prim.Exception
     Prim.IO
     Prim.Kappa

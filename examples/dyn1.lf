@@ -1,0 +1,4 @@
+(new 10 (lambda (x)
+(new 20 (lambda (y)
+  (do {f <- (with x 3.14 ``(with y -1 `(+ (ask x) (ask y))))}
+      (f))))))

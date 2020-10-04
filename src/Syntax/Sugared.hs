@@ -34,6 +34,7 @@ import Language.SexpGrammar.Generic
 import Expr (Variable(..))
 import qualified Expr as Raw
 import qualified Prim.Base as Raw (BasePrim(..), BaseType(..))
+import qualified Prim.Dyn as Raw (DynPrim(..))
 import qualified Prim.Exception as Raw (ExceptionPrim(..))
 import qualified Prim.IO as Raw (IOPrim(..))
 import qualified Prim.Link.Types as Raw (LinkPrim(..))
@@ -92,6 +93,7 @@ dsPos (Position fn l c) = Raw.Position (pack fn) l c l c
 
 desugar :: forall t p.
   ( Raw.BasePrim :<< p
+  , Raw.DynPrim :<< p
   , Raw.RecordPrim :<< p
   , Raw.VariantPrim :<< p
   , Raw.IOPrim :<< p
@@ -262,6 +264,7 @@ desugar = resolvePrimitives . futu coalg
 
 primitives :: forall p proxy.
   ( Raw.BasePrim :<< p
+  , Raw.DynPrim :<< p
   , Raw.IOPrim :<< p
   , Raw.KappaPrim :<< p
   , Raw.LinkPrim :<< p
@@ -271,6 +274,12 @@ primitives _ = M.fromList
   [ (Variable "+",           (0, inject' Raw.Add))
   , (Variable "readnum",     (0, inject' Raw.ReadDouble))
   , (Variable "shownum",     (0, inject' Raw.ShowDouble))
+
+    -- Dyn
+  , (Variable "new",         (0, inject' Raw.NewVar))
+  , (Variable "new-global",  (0, inject' Raw.NewGlobalVar))
+  , (Variable "ask",         (0, inject' Raw.AskVar))
+  , (Variable "with",        (0, inject' Raw.SetVar))
 
     -- IO
   , (Variable "readln",      (0, inject' Raw.ReadLn))
@@ -304,6 +313,7 @@ primitives _ = M.fromList
 resolvePrimitives ::
   forall t p.
   ( Raw.BasePrim :<< p
+  , Raw.DynPrim :<< p
   , Raw.IOPrim :<< p
   , Raw.KappaPrim :<< p
   , Raw.LinkPrim :<< p

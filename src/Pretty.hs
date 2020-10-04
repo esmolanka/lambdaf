@@ -37,8 +37,9 @@ ppKind (Arr a b) = ppKind a <+> "→" <+> ppKind b
 ppKind Star     = "⋆"
 ppKind Row      = "Ω"
 ppKind Presence = "Ψ"
-ppKind EStar    = "▴"
+ppKind EStar    = "⊛"
 ppKind EStack   = "Σ"
+ppKind Region   = "Ξ"
 
 ppTyVar :: TVar -> Doc ann
 ppTyVar (TVar n k) = ppPrefix k <> pretty n
@@ -49,6 +50,7 @@ ppTyVar (TVar n k) = ppPrefix k <> pretty n
     ppPrefix Presence = "ω"
     ppPrefix EStar    = "β"
     ppPrefix EStack   = "τ"
+    ppPrefix Region   = "σ"
 
 ppMetaVar :: MetaVar -> Doc ann
 ppMetaVar (MetaVar n k) = ppPrefix k <> pretty n
@@ -59,6 +61,7 @@ ppMetaVar (MetaVar n k) = ppPrefix k <> pretty n
     ppPrefix Presence = "'ω"
     ppPrefix EStar    = "'β"
     ppPrefix EStack   = "'τ"
+    ppPrefix Region   = "'σ"
 
 ppType :: (Pretty1 (Sum (Map Const t))) => Type t -> Doc ann
 ppType = (group .) . para $ \case

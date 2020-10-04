@@ -32,9 +32,10 @@ import Eval
 import Expr
 import Pretty
 import Prim.Base
-import Prim.Kappa
+import Prim.Dyn
 import Prim.Exception
 import Prim.IO
+import Prim.Kappa
 import Prim.Link.Types
 import Prim.Record
 import Prim.Variant
@@ -49,12 +50,16 @@ instance Pretty LinkPrim where
 
 instance ( MonadFail m
          , Member (RuntimeErrorEffect) sig
+         , Member (DynEnvEffect v) sig
+         , Member (DynAllocEffect) sig
          , Member (EnvEffect v) sig
          , Member (ExceptionEffect v) sig
          , Member (KappaEffect) sig
+         , Apply Pretty1 v
          , Carrier sig m
          , MonadIO m
          , LambdaValue m :< v
+         , DynValue :< v
          , BaseValue :< v
          , RecordValue :< v
          , VariantValue :< v
@@ -68,8 +73,12 @@ instance ( MonadFail m
               src <- liftIO $ BL8.readFile (T.unpack fn)
               expr <- case Language.SexpGrammar.decodeWith sugaredGrammar (T.unpack fn) src of
                 Left err -> evalError $ "Link:\n" ++ err
-                Right sug -> pure (desugar sug :: Expr '[BaseType, KappaType] '[BasePrim, RecordPrim, VariantPrim, IOPrim, KappaPrim, LinkPrim, ExceptionPrim])
-              case runInfer @[BaseType, KappaType] (check expr (typeCtor BTFloat)) of
+                Right sug -> pure
+                  (desugar sug :: Expr
+                     '[BaseType, KappaType, DynType]
+                     '[BasePrim, DynPrim, RecordPrim, VariantPrim, IOPrim, KappaPrim, LinkPrim, ExceptionPrim]
+                  )
+              case runInfer @[BaseType, KappaType, DynType] (check expr (typeCtor BTFloat)) of
                 Left tcerror -> evalError $ "Link:\n" ++ render (ppError tcerror)
                 Right _ ->
                   pure $ mkVLam @m $ \_ ->

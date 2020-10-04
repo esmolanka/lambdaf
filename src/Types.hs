@@ -60,6 +60,7 @@ instance IsString Label where
 data Kind
   = Arr Kind Kind
   | Star
+  | Region
   | Row
   | Presence
   | EStar

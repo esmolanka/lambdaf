@@ -563,33 +563,33 @@ inferKind pos = cata (alg <=< sequence)
     alg :: TypeF t Kind -> m Kind
     alg = \case
       -- Base
-      TRef tv              -> return (tvKind tv)
-      TMeta tv             -> return (etvKind tv)
-      TForall _ k          -> return k
-      TExists _ k          -> return k
+      TRef tv              -> pure (tvKind tv)
+      TMeta tv             -> pure (etvKind tv)
+      TForall _ k          -> pure k
+      TExists _ k          -> pure k
       TApp (Arr a b) c
-        | a == c           -> return b
+        | a == c           -> pure b
 
       -- Primitive types
-      TArrow Star Star     -> return Star
-      TUnit                -> return Star
-      TVoid                -> return Star
+      TArrow Star Star     -> pure Star
+      TUnit                -> pure Star
+      TVoid                -> pure Star
 
       -- External type constructors
       TCtor c              -> pure (kindOfCtor c)
 
       -- Embedded language
-      TSNil                -> return EStack
-      TSCons EStar EStack  -> return EStack
+      TSNil                -> pure EStack
+      TSCons EStar EStack  -> pure EStack
 
       -- Row types
-      TRecord Row          -> return Star
-      TVariant Row         -> return Star
-      TPresent             -> return Presence
-      TAbsent              -> return Presence
-      TRowEmpty            -> return Row
+      TRecord Row          -> pure Star
+      TVariant Row         -> pure Star
+      TPresent             -> pure Presence
+      TAbsent              -> pure Presence
+      TRowEmpty            -> pure Row
       TRowExtend _
-        Presence Star Row  -> return Row
+        Presence Star Row  -> pure Row
 
       other                -> throwError (TCError pos (IllKindedType other))
 
