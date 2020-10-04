@@ -118,10 +118,10 @@ instance Pretty KappaPrim where
     KConstDbl  -> "κ/▴"
     KConstVec  -> "κ/▴ⁿ"
     KConstBool -> "κ/▴"
-    (KPrim p)  -> "κ/" <> pretty (show p)
-    KCons      -> "κ/**"
-    KFirst     -> "κ/!"
-    KRest      -> "κ/…"
+    KPrim p    -> "κ/" <> pretty (show p)
+    KCons      -> "κ/×"
+    KFirst     -> "κ/₁"
+    KRest      -> "κ/₂"
 
 instance
   ( MonadFail m

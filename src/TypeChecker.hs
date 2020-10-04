@@ -579,8 +579,8 @@ inferKind pos = cata (alg <=< sequence)
       TCtor c              -> pure (kindOfCtor c)
 
       -- Embedded language
-      TSNil                 -> return EStack
-      TSCons EStar EStack   -> return EStack
+      TSNil                -> return EStack
+      TSCons EStar EStack  -> return EStack
 
       -- Row types
       TRecord Row          -> return Star

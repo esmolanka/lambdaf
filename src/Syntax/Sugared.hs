@@ -19,8 +19,8 @@ import Control.Category (id, (>>>))
 import Control.Monad.Free
 import Control.Effect.Reader
 
-import Data.Coerce
 import Data.Char (isUpper)
+import Data.Coerce
 import Data.Functor.Foldable (Fix(..), cata, futu)
 import qualified Data.Map as M
 import Data.Proxy
@@ -231,7 +231,7 @@ desugar = resolvePrimitives . futu coalg
                 foldr bind
                   (case last stmts of
                       IgnoringBinding e -> mkSeq pos dummyVar e (Free (Raw.Ref (dsPos pos) dummyVar))
-                      OrdinarySeqBinding x e -> mkSeq pos x e (Free (Raw.Ref (dsPos pos) x)))
+                      OrdinarySeqBinding x e -> mkSeq pos x e (Free (Raw.Prim (dsPos pos) (inject' Raw.MkUnit))))
                   (init stmts)
 
       Fix (Loop pos xs body) ->
@@ -311,7 +311,7 @@ resolvePrimitives ::
   , Raw.BaseType :<< t
   , Raw.KappaType :<< t
   ) => Raw.Expr t p -> Raw.Expr t p
-resolvePrimitives expr = run . runReader (primitives (Proxy @p)) $ (cata alg expr)
+resolvePrimitives expr = run . runReader (primitives (Proxy @p)) $ cata alg expr
   where
     alg :: forall m sig r.
            ( r ~ M.Map Variable (Int, Sum' p)

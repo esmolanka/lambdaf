@@ -1,12 +1,13 @@
+{-# LANGUAGE ConstraintKinds            #-}
 {-# LANGUAGE DataKinds                  #-}
 {-# LANGUAGE DeriveFunctor              #-}
-{-# LANGUAGE ConstraintKinds            #-}
 {-# LANGUAGE FlexibleContexts           #-}
 {-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE KindSignatures             #-}
 {-# LANGUAGE LambdaCase                 #-}
 {-# LANGUAGE MonoLocalBinds             #-}
 {-# LANGUAGE MultiParamTypeClasses      #-}
+{-# LANGUAGE OverloadedStrings          #-}
 {-# LANGUAGE ScopedTypeVariables        #-}
 {-# LANGUAGE TypeApplications           #-}
 {-# LANGUAGE TypeOperators              #-}
@@ -19,6 +20,7 @@ module Eval
   , evalError
   , EnvEffect
   , EnvEffectC
+  , Env
   , localEnv
   , askEnv
   , runEnv
@@ -31,12 +33,12 @@ import Control.Effect.Error
 import Control.Effect.Fail
 import Control.Effect.Reader
 
+import Data.Coerce
 import Data.Functor.Const
-import Data.Functor.Foldable (unfix, cata)
+import Data.Functor.Foldable (cata)
 import qualified Data.Map as M
 import Data.Sum
 import Data.Void
-import Data.Coerce
 
 import Expr
 import Utils
@@ -58,10 +60,7 @@ type EnvEffectC v = ReaderC (Env v)
 runEnv :: EnvEffectC v m a -> m a
 runEnv = runReader (Env M.empty)
 
-localEnv
-  :: (Member (EnvEffect v) sig, Carrier sig m) =>
-     (M.Map Variable (Value v) -> M.Map Variable (Value v))
-  -> m a -> m a
+localEnv :: (Member (EnvEffect v) sig, Carrier sig m) => (M.Map Variable (Value v) -> M.Map Variable (Value v)) -> m a -> m a
 localEnv f = local (\(Env m) -> Env . f $ m)
 
 askEnv :: (Member (EnvEffect v) sig, Carrier sig m) => Variable -> m (Maybe (Value v))
@@ -76,6 +75,7 @@ instance (Apply (EvalPrim m v) ps) => EvalPrim m v (Sum ps) where
 eval :: forall m sig (t :: [*]) (p :: [*]) (v :: [* -> *]).
   ( Member RuntimeErrorEffect sig
   , Member (EnvEffect v) sig
+  , MonadFail m
   , Carrier sig m
   , EvalPrim m v (Sum (Map Const p))
   , LambdaValue m :< v
@@ -95,13 +95,11 @@ eval = cata alg
         let f v = localEnv (\_ -> M.insert x v env) body
         pure $ mkVLam @m f
 
-      App pos f e -> do
-        f' <- f
-        case project (unfix f') of
-          Just (VLam f'') -> e >>= f''
-          _ -> evalError $ show pos ++ ": Could not apply to a non-function"
+      App _pos f e -> do
+        Just f' <- projLambda <$> f
+        e >>= f'
 
-      Annot _pos body _ ->
+      Annot _pos body _ty ->
         body
 
       Let _pos x e body -> do

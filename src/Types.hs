@@ -66,6 +66,8 @@ data Kind
   | EStack
   deriving (Show, Eq, Ord)
 
+infixr 3 `Arr`
+
 data TVar = TVar
   { tvName :: Int
   , tvKind :: Kind
