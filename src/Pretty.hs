@@ -67,14 +67,10 @@ ppType :: (Pretty1 (Sum (Map Const t))) => Type t -> Doc ann
 ppType = (group .) . para $ \case
   TUnit -> "()"
   TVoid -> "∅"
-  TSNil -> "ε"
-  TSCons (_,h) (_,t) -> h <+> "::" <+> t
 
   TCtor name -> liftPretty absurd name
 
-  TApp (_,a) (Fix TSCons{}, b) -> a <> "⟨" <> b <> "⟩"
-  TApp (_,a) (Fix TSNil{}, b) -> a <> "⟨" <> b <> "⟩"
-  TApp (_,a) (_,b) -> a <+> b
+  TApp (_,a) (_,b) -> parens (a <+> b)
 
   TRef tv -> ppTyVar tv
   TMeta tv -> ppMetaVar tv

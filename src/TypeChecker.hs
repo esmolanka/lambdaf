@@ -287,11 +287,6 @@ freshMeta _ k = do
     TUnit ≤· TUnit = pure ()
     TVoid ≤· TVoid = pure ()
 
-    TSNil ≤· TSNil = pure ()
-    TSCons h t ≤· TSCons h' t' = do
-      h ≤ h'
-      getCtx >>= \ctx -> applySolutions ctx t ≤ applySolutions ctx t'
-
     TRecord a ≤· TRecord a' = a ≤ a'
     TVariant a ≤· TVariant a' = a ≤ a'
 
@@ -577,10 +572,6 @@ inferKind pos = cata (alg <=< sequence)
 
       -- External type constructors
       TCtor c              -> pure (kindOfCtor c)
-
-      -- Embedded language
-      TSNil                -> pure EStack
-      TSCons EStar EStack  -> pure EStack
 
       -- Row types
       TRecord Row          -> pure Star

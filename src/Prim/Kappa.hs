@@ -66,6 +66,8 @@ data KappaType
   | KTFloat
   | KTVector
   | KTDyn
+  | TSNil
+  | TSCons
     deriving (Eq, Show)
 
 instance Pretty KappaType where
@@ -74,6 +76,8 @@ instance Pretty KappaType where
     KTFloat -> "Float"
     KTVector -> "Vector"
     KTDyn -> "Dyn"
+    TSNil -> "Nil"
+    TSCons -> "Cons"
 
 instance KindOfCtor (Const KappaType) where
   kindOfCtor = \case
@@ -81,12 +85,21 @@ instance KindOfCtor (Const KappaType) where
     Const KTFloat  -> EStar
     Const KTVector -> EStar `Arr` EStar
     Const KTDyn    -> EStack `Arr` Star
+    Const TSNil    -> EStack
+    Const TSCons   -> EStar `Arr`  EStack `Arr` EStack
 
 typeVectorOf :: (KappaType :<< t) => Type t -> Type t
 typeVectorOf a = typeCtor KTVector @: a
 
 typeDynOf :: (KappaType :<< t) => Type t -> Type t
 typeDynOf a = typeCtor KTDyn @: a
+
+(#:) :: (KappaType :<< t) => Type t -> Type t -> Type t
+(#:) a b = typeCtor TSCons @: a @: b
+infixr 5 #:
+
+nil :: (KappaType :<< t) => Type t
+nil = typeCtor TSNil
 
 data KappaValue e
   = VVal [EValue]

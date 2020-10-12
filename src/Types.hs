@@ -34,8 +34,6 @@ module Types
   , mono
   , (~>)
   , (@:)
-  , (#:)
-  , nil
   , typeCtor
   ) where
 
@@ -108,11 +106,6 @@ data TypeF (p :: [*]) e
   | TRowEmpty              -- ROW
   | TRowExtend Label e e e -- PRESENCE -> STAR -> ROW -> ROW
 
-  ----------------------------------------------------------------------
-  -- Embedded language types
-  | TSNil                  -- ESTACK
-  | TSCons  e e            -- ESTAR -> ESTACK -> ESTACK
-
   deriving (Functor, Foldable, Traversable, Generic1)
 
 instance (Apply Eq1 (Map Const t)) => Eq1 (TypeF t) where
@@ -184,13 +177,6 @@ infixr 3 ~>
 
 (~>) :: Type t -> Type t -> Type t
 a ~> b = Fix (TArrow a b)
-
-(#:) :: Type t -> Type t -> Type t
-(#:) a b = Fix (TSCons a b)
-infixr 5 #:
-
-nil :: Type t
-nil = Fix TSNil
 
 (@:) :: Type t -> Type t -> Type t
 (@:) f a = Fix (TApp f a)
