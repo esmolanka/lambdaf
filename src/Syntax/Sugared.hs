@@ -237,7 +237,7 @@ desugar = resolvePrimitives . futu coalg
                   (init stmts)
 
       Fix (Loop pos xs body) ->
-        let primLoop = Free (Raw.Prim (dsPos pos) (inject' (Raw.KPrim Raw.ELoop)))
+        let primLoop = Free (Raw.Prim (dsPos pos) (inject' (Raw.KLoop)))
             app f a  = Free (Raw.App (dsPos pos) f a)
             lam v b  = Free (Raw.Lambda (dsPos pos) v b)
         in unFree $
@@ -307,10 +307,10 @@ primitives _ = M.fromList
   , (Variable "^div",        (0, inject' (Raw.KPrim Raw.EDiv)))
   , (Variable "^fold",       (0, inject' (Raw.KPrim Raw.EFold)))
   , (Variable "^map",        (0, inject' (Raw.KPrim Raw.EMap)))
-  , (Variable "^loop",       (0, inject' (Raw.KPrim Raw.ELoop)))
   , (Variable "^branch",     (0, inject' (Raw.KPrim Raw.EBranch)))
   , (Variable "^head",       (0, inject' Raw.KFirst))
   , (Variable "^tail",       (0, inject' Raw.KRest))
+  , (Variable "^loop",       (0, inject' Raw.KLoop))
   ]
 
 resolvePrimitives ::

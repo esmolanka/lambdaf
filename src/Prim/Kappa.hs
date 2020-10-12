@@ -60,6 +60,7 @@ data KappaPrim
   | KCons
   | KFirst
   | KRest
+  | KLoop
 
 data KappaType
   = KTBool
@@ -135,6 +136,7 @@ instance Pretty KappaPrim where
     KCons      -> "κ/×"
     KFirst     -> "κ/₁"
     KRest      -> "κ/₂"
+    KLoop      -> "κ/ℓ"
 
 instance
   ( MonadFail m
@@ -181,16 +183,6 @@ instance
         Just f' <- pure . projAbs =<< mkKappa [1, n] f
         mkVVal <$> eapply EFold n [f'] (xs' : b')
 
-    Const (KPrim ELoop) ->
-      pure $ mkVLam @m $ \f -> do
-        Just f' <- projAbs <$> mkKappa [1] f
-        let coarity = go f' - 1
-              where
-                go (EAbs _ expr) = go' expr
-                go' (ELet _ _ _ _ k) = go' k
-                go' (EReturn xs) = length xs
-        mkVVal <$> eapply ELoop coarity [f'] []
-
     Const (KPrim EBranch) ->
       pure $ mkVLam @m $ \c ->
       pure $ mkVLam @m $ \t ->
@@ -223,6 +215,14 @@ instance
       pure $ mkVLam @m $ \x -> do
         Just (_ : xs) <- pure $ projVal x
         pure $ mkVVal xs
+
+    Const KLoop ->
+      pure $ mkVLam @m $ \f -> do
+        Just f' <- pure $ projLambda @m f
+        eloop $ \x -> do
+          Just (VPair v r) <- projBase <$> f' (mkVVal [ERef x])
+          Just (v' : []) <- pure $ projVal v
+          pure (v', r)
 
 mkKappa
   :: forall v sig m.
@@ -304,14 +304,6 @@ instance (BaseType :<< t, KappaType :<< t) => TypePrim t (Const KappaPrim) where
         (typeDynOf $ t) ~>
         (typeDynOf $ t)
 
-    Const (KPrim ELoop) ->
-      forall EStar  $ \a ->
-      forall EStar  $ \b ->
-      forall EStack $ \t ->
-      mono $
-        (typeDynOf (a #: nil) ~> typeDynOf (a #: b #: t)) ~>
-        (typeDynOf $ b #: t)
-
     Const (KPrim EBranch) ->
       forall EStar  $ \a ->
       mono $
@@ -342,6 +334,14 @@ instance (BaseType :<< t, KappaType :<< t) => TypePrim t (Const KappaPrim) where
         (typeDynOf $ a #: t) ~>
         (typeDynOf $ t)
 
+    Const KLoop ->
+      forall EStar $ \a ->
+      forall Star  $ \b ->
+      mono $
+        (typeDynOf (a #: nil) ~> typePairOf (typeDynOf (a #: nil)) b) ~>
+        b
+
+
 ----------------------------------------------------------------------
 
 data EState = EState
@@ -353,6 +353,9 @@ data EState = EState
 newtype EVar = EVar Int
   deriving (Show, Ord, Eq)
 
+newtype EPersistent = EPersistent Int
+  deriving (Show, Ord, Eq)
+
 data EPrim
   = EAdd
   | EMul
@@ -360,24 +363,25 @@ data EPrim
   | EDiv
   | EFold
   | EMap
-  | ELoop
   | EBranch
   deriving (Show, Eq, Ord)
 
 data EExpr
-  = EReturn [EValue]
-  | ELet [EVar] EPrim [EAbs] [EValue] EExpr
+  = ELet    [EVar] EPrim [EAbs] [EValue] EExpr
+  | ELoad   EVar EPersistent EExpr
+  | EStore  EPersistent EValue EExpr
+  | EReturn [EValue]
   deriving (Show)
 
 data EAbs = EAbs [EVar] EExpr
   deriving (Show)
 
 data EValue
-  = ERef EVar
+  = ERef  EVar
   | EUnit
   | EBool Bool
-  | ELit Double
-  | EVec [Double]
+  | ELit  Double
+  | EVec  [Double]
   deriving (Show)
 
 fresh :: (Member KappaEffect sig, Carrier sig m) => m EVar
@@ -404,6 +408,16 @@ eapply p coarity fs xs = do
   -- traceState $ "EAPPLY " ++ show p ++ " " ++ show xs ++ " " ++ show fs
   pure (map ERef vars)
 
+eloop :: (Member KappaEffect sig, Carrier sig m) => (EVar -> m (EValue, a)) -> m a
+eloop f = do
+  EVar n <- fresh
+  let eload = ELoad (EVar n) (EPersistent n)
+  modify $ \st -> st { focused = focused st . eload }
+  (val, res) <- f (EVar n)
+  let estore v = EStore (EPersistent n) v
+  modify $ \st -> st { focused = focused st . estore val }
+  pure res
+
 eunkappa :: (Member RuntimeErrorEffect sig, Member KappaEffect sig, Carrier sig m) => m (EExpr -> EExpr)
 eunkappa = do
   expr <- gets focused
@@ -422,6 +436,9 @@ toEExpr values = do
 
 ppEVar :: EVar -> Doc ann
 ppEVar (EVar n) = "@" <> pretty n
+
+ppEPersistent :: EPersistent -> Doc ann
+ppEPersistent (EPersistent n) = "State" <> angles (pretty n)
 
 ppEValue :: EValue -> Doc ann
 ppEValue = \case
@@ -451,6 +468,14 @@ ppEExpr = \case
     [ "LET" <+> ppTuple (map ppEVar refs) <+> ":=" <+> ppEPrim prim <+> ppTuple (map ppEValue args) ] ++
     map (\fun -> indent 2 $ "WITH" <+> ppEAbs fun) fs ++
     [ ppEExpr rest ]
+  ELoad ref persistent rest -> vsep $
+    [ "GET" <+> ppEVar ref <+> ":=" <+> ppEPersistent persistent
+    , ppEExpr rest
+    ]
+  EStore persistent ref rest -> vsep $
+    [ "SET" <+> ppEPersistent persistent <+> ":=" <+> ppEValue ref
+    , ppEExpr rest
+    ]
   EReturn vals ->
     "RET" <+> ppTuple (map ppEValue vals)
 
