@@ -58,6 +58,13 @@ instance Pretty RecordPrim where
     RecordSelect lbl  -> "RecordSelect" <> angles (ppLabel lbl)
     RecordDefault lbl -> "RecordDefault" <> angles (ppLabel lbl)
 
+instance PrettyType (Const RecordType) where
+  prettySpine _lvl = \case
+    (Const TRecord, [a]) -> Just $ braces (align $ a 0)
+    _ -> Nothing
+  prettyCtor = \case
+    Const TRecord -> "Record"
+
 instance KindOfCtor (Const RecordType) where
   kindOfCtor = \case
     Const TRecord   -> Row `Arr` Star

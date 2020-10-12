@@ -35,9 +35,10 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Prettyprint.Doc as PP
 
-import Expr
-import Types
 import Eval
+import Expr
+import Pretty
+import Types
 import Utils
 
 data BasePrim
@@ -70,13 +71,18 @@ typeListOf a = typeCtor BTList @: a
 typePairOf :: (BaseType :<< t) => Type t -> Type t -> Type t
 typePairOf a b = typeCtor BTPair @: a @: b
 
-instance Pretty BaseType where
-  pretty = \case
-    BTFloat -> "Float"
-    BTBool -> "Bool"
-    BTText -> "Text"
-    BTList -> "List"
-    BTPair -> "Pair"
+instance PrettyType (Const BaseType) where
+  prettySpine lvl = \case
+    (Const BTList, [a]) -> Just (brackets (a 0))
+    (Const BTPair, [a, b]) -> Just $ parensIf (lvl > 1) $ a 2 <+> "×" <+> b 1
+    _ -> Nothing
+
+  prettyCtor = \case
+    Const BTFloat -> "Float"
+    Const BTBool -> "Bool"
+    Const BTText -> "Text"
+    Const BTList -> "List"
+    Const BTPair -> "Pair"
 
 instance KindOfCtor (Const BaseType) where
   kindOfCtor = \case

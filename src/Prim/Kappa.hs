@@ -42,6 +42,7 @@ import Data.Text.Prettyprint.Doc as PP
 
 import Eval
 import Expr
+import Pretty
 import Prim.Base
 import Types
 import Utils
@@ -66,12 +67,17 @@ data KappaType
   | KTDyn
     deriving (Eq, Show)
 
-instance Pretty KappaType where
-  pretty = \case
-    KTBool -> "Bool"
-    KTFloat -> "Float"
-    KTVector -> "Vector"
-    KTDyn -> "Dyn"
+instance PrettyType (Const KappaType) where
+  prettySpine _lvl = \case
+    (Const KTVector, [a]) -> Just $ a 2 <> "[]"
+    (Const KTDyn, [a]) -> Just $ "Dyn⟨" <> a 0 <> "⟩"
+    _ -> Nothing
+
+  prettyCtor = \case
+    Const KTBool   -> "Bool"
+    Const KTFloat  -> "Float"
+    Const KTVector -> "Vector"
+    Const KTDyn    -> "Dyn"
 
 instance KindOfCtor (Const KappaType) where
   kindOfCtor = \case

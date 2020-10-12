@@ -51,6 +51,13 @@ instance Pretty VariantPrim where
     VariantDecomp lbl -> "VariantDecomp" <> angles (ppLabel lbl)
     VariantAbsurd     -> "VariantAbsurd"
 
+instance PrettyType (Const VariantType) where
+  prettySpine _lvl = \case
+    (Const TVariant, [a]) -> Just $ angles (align $ a 0)
+    _ -> Nothing
+  prettyCtor = \case
+    Const TVariant -> "Variant"
+
 instance KindOfCtor (Const VariantType) where
   kindOfCtor = \case
     Const TVariant   -> Row `Arr` Star

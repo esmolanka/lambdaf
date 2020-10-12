@@ -15,13 +15,11 @@ import Control.Category ((>>>))
 import Control.Effect.Reader
 
 import Data.Functor.Classes
-import Data.Functor.Const
 import Data.Functor.Foldable (Fix(..), para)
 import Data.Sum
 import qualified Data.Text as T
 import Data.Text.Prettyprint.Doc
 import qualified Data.Text.Prettyprint.Doc.Render.Text as ToText
-
 import Data.Void
 
 import Errors
@@ -31,6 +29,16 @@ import Utils
 
 ----------------------------------------------------------------------
 -- Types
+
+class PrettyType (t :: * -> *) where
+  prettyCtor :: t Void -> Doc ann
+
+  prettySpine :: forall ann. Int -> (t Void, [Int -> Doc ann]) -> Maybe (Doc ann)
+  prettySpine _ _ = Nothing
+
+instance (Apply PrettyType ts) => PrettyType (Sum ts) where
+  prettyCtor = apply @PrettyType prettyCtor
+  prettySpine lvl (n, args) = apply @PrettyType (\a -> prettySpine lvl (a, args)) n
 
 ppLabel :: Label -> Doc ann
 ppLabel (Label s) = pretty s
@@ -64,16 +72,23 @@ ppMetaVar (MetaVar n k) = ppPrefix k <> pretty n
     ppPrefix EStar    = "'β"
     ppPrefix Region   = "'σ"
 
-ppType :: forall t ann. (Pretty1 (Sum (Map Const t))) => Type t -> Doc ann
+parensIf :: Bool -> Doc ann -> Doc ann
+parensIf True = parens
+parensIf False = id
+
+ppType :: forall t ann. (Apply' PrettyType t) => Type t -> Doc ann
 ppType = ppType' 0
+
+ppType' :: forall t ann. (Apply' PrettyType t) => Int -> Type t -> Doc ann
+ppType' lvl = spine >>> \case
+  (Fix (TCtor name), rest) | Just doc <- prettySpine lvl (name, map (\x n -> ppType' n x) rest) ->
+    doc
+  (Fix otherTyCon, []) ->
+    ppTypeCon lvl otherTyCon
+  (Fix otherTyCon, rest) ->
+    parensIf (lvl > 1) $ group $ nest 2 $ hsep (ppTypeCon 1 otherTyCon : map (ppType' 2) rest)
+
   where
-    parensIf :: Bool -> Doc ann -> Doc ann
-    parensIf True = parens
-    parensIf False = id
-
-    ppSpine :: TypeF t (Type t) -> [Type t] -> Doc ann
-    ppSpine f args = hsep (ppTypeCon 1 f : map (ppType' 2) args)
-
     ppTypeCon :: Int -> TypeF t (Type t) -> Doc ann
     ppTypeCon lvl = \case
       TUnit      -> "unit"
@@ -82,23 +97,20 @@ ppType = ppType' 0
       TMeta tv   -> ppMetaVar tv
 
       TArrow a b ->
-        parensIf (lvl > 0) $ group $ ppType' 1 a <> line <> "→" <+> ppType' 0 b
+        parensIf (lvl > 0) $ group $ nest 2 $ ppType' 1 a <> line <> "→" <+> ppType' 0 b
 
       TForall tv e  -> parensIf (lvl > 0) ("∀" <+> ppTyVar tv <> "." <+> ppType' 0 e)
       TExists tv e  -> parensIf (lvl > 0) ("∃" <+> ppTyVar tv <> "." <+> ppType' 0 e)
 
-      TCtor name    -> liftPretty absurd name
+      TCtor name    -> prettyCtor name
 
-      TRecord row   -> group $ braces $ space <> align (ppType' 0 row <> space)
-      TVariant row  -> group $ angles $ space <> align (ppType' 0 row <> space)
+      TApp _ _      -> error "Impossible"
 
-      TApp f a      -> parensIf (lvl > 1) $ ppType' 1 f <+> ppType' 2 a
+      TPresent      -> "+"
+      TAbsent       -> "-"
+      TRowEmpty     -> "∅"
 
-      TPresent      -> "▪︎"
-      TAbsent       -> "▫︎"
-      TRowEmpty     -> "Nil"
-
-      TRowExtend lbl p' f' t' ->
+      TRowExtend lbl p' f' t' -> parensIf (lvl > 0) $
         let label = case p' of
               Fix TPresent -> ppLabel lbl
               Fix TAbsent  -> "¬" <> ppLabel lbl
@@ -112,27 +124,19 @@ ppType = ppType' 0
         in case t' of
              Fix (TRowEmpty) -> field
              Fix (TRef{})    -> field <+> "|" <+> ppType' 0 t'
+             Fix (TMeta{})   -> field <+> "|" <+> ppType' 0 t'
              Fix _           -> vsep [ field <> ",", ppType' 0 t' ]
-
-
-    ppType' :: Int -> Type t -> Doc ann
-    ppType' lvl = spine >>> \case
-      (Fix otherTyCon, []) ->
-        ppTypeCon lvl otherTyCon
-
-      (Fix otherTyCon, rest) ->
-        parensIf (lvl > 1) $ group $ nest 2 $ ppSpine otherTyCon rest
 
 ----------------------------------------------------------------------
 -- Errors
 
-ppError :: (Pretty1 (Sum (Map Const t)), Show1 (TypeF t)) => TCError t -> Doc ann
+ppError :: (Apply' PrettyType t, Show1 (TypeF t)) => TCError t -> Doc ann
 ppError (TCError pos reason) =
   vsep [ pretty pos <> ": type check error:"
        , indent 2 $ ppReason reason
        ]
 
-ppReason :: (Pretty1 (Sum (Map Const t)), Show1 (TypeF t)) => Reason t -> Doc ann
+ppReason :: (Apply' PrettyType t, Show1 (TypeF t)) => Reason t -> Doc ann
 ppReason = \case
   CannotUnify t1 t2 -> vsep
     [ "Cannot match expected type with actual type."
@@ -172,7 +176,7 @@ ppReason = \case
 ppVariable :: Variable -> Doc ann
 ppVariable (Variable x) = pretty x
 
-ppExpr :: forall t p ann. (Apply' Pretty1 p, Apply' Pretty1 t) => Expr t p -> Doc ann
+ppExpr :: forall t p ann. (Apply' Pretty1 p, Apply' PrettyType t) => Expr t p -> Doc ann
 ppExpr = run . runReader @Int 0 . para alg
   where
     parensIf :: Bool -> Doc ann -> Doc ann

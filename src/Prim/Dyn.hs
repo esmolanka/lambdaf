@@ -34,8 +34,9 @@ import qualified Data.IntMap as IM
 import Data.Sum
 import Data.Text.Prettyprint.Doc as PP
 
-import Expr
 import Eval
+import Expr
+import Pretty
 import Prim.Base
 import Types
 import Utils
@@ -83,10 +84,10 @@ data DynType
   | DTGlobal
     deriving (Eq, Show)
 
-instance Pretty DynType where
-  pretty = \case
-    DTParameter -> "Parameter"
-    DTGlobal -> "Global"
+instance PrettyType (Const DynType) where
+  prettyCtor = \case
+    Const DTParameter -> "Parameter"
+    Const DTGlobal -> "Global"
 
 instance KindOfCtor (Const DynType) where
   kindOfCtor = \case
