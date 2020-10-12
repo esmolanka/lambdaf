@@ -12,15 +12,18 @@
 
 module Prim.Base
   ( BaseValue(..)
-  , mkVFloat
   , mkVBool
+  , mkVFloat
+  , mkVList
   , mkVText
+  , mkVPair
   , mkVUnit
   , projBase
   , BasePrim(..)
   , partialEff
   , BaseType(..)
   , typeListOf
+  , typePairOf
   ) where
 
 import Control.Effect.Carrier
@@ -45,6 +48,9 @@ data BasePrim
   | Delay
   | ListNil
   | ListCons
+  | MkPair
+  | PairFst
+  | PairSnd
   | MkBool Bool
   | MkFloat Double
   | MkText Text
@@ -55,10 +61,14 @@ data BaseType
   | BTBool
   | BTText
   | BTList
+  | BTPair
     deriving (Eq, Show)
 
 typeListOf :: (BaseType :<< t) => Type t -> Type t
 typeListOf a = typeCtor BTList @: a
+
+typePairOf :: (BaseType :<< t) => Type t -> Type t -> Type t
+typePairOf a b = typeCtor BTPair @: a @: b
 
 instance Pretty BaseType where
   pretty = \case
@@ -66,6 +76,7 @@ instance Pretty BaseType where
     BTBool -> "Bool"
     BTText -> "Text"
     BTList -> "List"
+    BTPair -> "Pair"
 
 instance KindOfCtor (Const BaseType) where
   kindOfCtor = \case
@@ -73,12 +84,14 @@ instance KindOfCtor (Const BaseType) where
     Const BTBool -> Star
     Const BTText -> Star
     Const BTList -> Star `Arr` Star
+    Const BTPair -> Star `Arr` Star `Arr` Star
 
 data BaseValue e
   = VFloat Double
   | VBool Bool
   | VText Text
   | VList [e]
+  | VPair e e
   | VUnit
 
 mkVFloat :: (BaseValue :< v) => Double -> Value v
@@ -93,6 +106,9 @@ mkVText x = Fix . inject $ VText x
 mkVList :: (BaseValue :< v) => [Value v] -> Value v
 mkVList xs = Fix . inject $ VList xs
 
+mkVPair :: (BaseValue :< v) => Value v -> Value v -> Value v
+mkVPair a b = Fix . inject $ VPair a b
+
 mkVUnit :: (BaseValue :< v) => Value v
 mkVUnit = Fix . inject $ VUnit
 
@@ -105,6 +121,7 @@ instance Pretty1 BaseValue where
     VBool x   -> pretty x
     VText x   -> pretty (show x)
     VList xs  -> list (map pp xs)
+    VPair a b -> parens (pp a <+> "×" <+> pp b)
     VUnit     -> "Unit"
 
 instance Pretty BasePrim where
@@ -116,6 +133,9 @@ instance Pretty BasePrim where
     Delay       -> "Delay"
     ListNil     -> "Nil"
     ListCons    -> "Cons"
+    MkPair      -> "Pair"
+    PairFst     -> ".1"
+    PairSnd     -> ".2"
     (MkBool b)  -> pretty b
     (MkFloat n) -> pretty n
     (MkText s)  -> pretty (show s)
@@ -179,6 +199,23 @@ instance ( Member RuntimeErrorEffect sig
             Just (VList xs') -> pure $ mkVList (x : xs')
             _ -> evalError "Wrong arguments"
 
+      Const MkPair ->
+        pure $ mkVLam @m $ \a ->
+        pure $ mkVLam @m $ \b ->
+          pure $ mkVPair a b
+
+      Const PairFst ->
+        pure $ mkVLam @m $ \p ->
+          case projBase p of
+            Just (VPair a _) -> pure a
+            _ -> evalError "Wrong argument"
+
+      Const PairSnd ->
+        pure $ mkVLam @m $ \p ->
+          case projBase p of
+            Just (VPair _ b) -> pure b
+            _ -> evalError "Wrong argument"
+
       Const (MkBool b) ->
         pure $ mkVBool b
 
@@ -225,6 +262,21 @@ instance (BaseType :<< t) => TypePrim t (Const BasePrim) where
       forall Star $ \a ->
       mono $
         a ~> typeListOf a ~> typeListOf a
+    Const MkPair ->
+      forall Star $ \a ->
+      forall Star $ \b ->
+      mono $
+        a ~> b ~> typePairOf a b
+    Const PairFst ->
+      forall Star $ \a ->
+      forall Star $ \b ->
+      mono $
+        typePairOf a b ~> a
+    Const PairSnd ->
+      forall Star $ \a ->
+      forall Star $ \b ->
+      mono $
+        typePairOf a b ~> b
     Const (MkBool _) ->
       mono $ typeCtor BTBool
     Const (MkFloat _) ->

@@ -158,7 +158,7 @@ desugar = resolvePrimitives . futu coalg
         in unFree $ foldr lcons lnil xs
 
       Fix (MkTuple pos a b cs) ->
-        let primCons = Free (Raw.Prim (dsPos pos) (inject' Raw.KCons))
+        let primCons = Free (Raw.Prim (dsPos pos) (inject' Raw.MkPair))
             app f x = Free (Raw.App (dsPos pos) f x)
             (e : es) = reverse (a : b : cs)
         in unFree $
@@ -287,6 +287,9 @@ primitives _ = M.fromList
 
     -- Lists
   , (Variable "cons",        (0, inject' Raw.ListCons))
+
+  , (Variable "fst",         (0, inject' Raw.PairFst))
+  , (Variable "snd",         (0, inject' Raw.PairSnd))
 
     -- Link
   , (Variable "link",        (0, inject' Raw.Link))
