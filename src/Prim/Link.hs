@@ -75,10 +75,10 @@ instance ( MonadFail m
                 Left err -> evalError $ "Link:\n" ++ err
                 Right sug -> pure
                   (desugar sug :: Expr
-                     '[BaseType, KappaType, DynType]
+                     '[BaseType, KappaType, DynType, RecordType, VariantType]
                      '[BasePrim, DynPrim, RecordPrim, VariantPrim, IOPrim, KappaPrim, LinkPrim, ExceptionPrim]
                   )
-              case runInfer @[BaseType, KappaType, DynType] (check expr (typeCtor BTFloat)) of
+              case runInfer @[BaseType, KappaType, DynType, RecordType, VariantType] (check expr (typeCtor BTFloat)) of
                 Left tcerror -> evalError $ "Link:\n" ++ render (ppError tcerror)
                 Right _ ->
                   pure $ mkVLam @m $ \_ ->

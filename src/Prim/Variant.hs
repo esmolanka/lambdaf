@@ -33,6 +33,10 @@ data VariantPrim
 data VariantValue e
   = VVariant Label e
 
+data VariantType
+  = TVariant
+    deriving (Eq, Show)
+
 mkVVariant :: (VariantValue :< v) => Label -> Value v -> Value v
 mkVVariant lbl = Fix . inject . VVariant lbl
 
@@ -46,6 +50,13 @@ instance Pretty VariantPrim where
     VariantInject lbl -> "VariantInject" <> angles (ppLabel lbl)
     VariantDecomp lbl -> "VariantDecomp" <> angles (ppLabel lbl)
     VariantAbsurd     -> "VariantAbsurd"
+
+instance KindOfCtor (Const VariantType) where
+  kindOfCtor = \case
+    Const TVariant   -> Row `Arr` Star
+
+typeVariantOf :: (VariantType :<< t) => Type t -> Type t
+typeVariantOf r = typeCtor TVariant @: r
 
 instance ( Member RuntimeErrorEffect sig
          , Carrier sig m
@@ -79,13 +90,13 @@ instance ( Member RuntimeErrorEffect sig
     where
       projVariant = project @VariantValue . unfix
 
-instance TypePrim t (Const VariantPrim) where
+instance (VariantType :<< t) => TypePrim t (Const VariantPrim) where
   typePrim = \case
     Const (VariantInject label) ->
       forall Star $ \a ->
       forall Row  $ \r ->
       mono $
-        a ~> Fix (TVariant (Fix (TRowExtend label (Fix TPresent) a r)))
+        a ~> typeVariantOf (Fix (TRowExtend label (Fix TPresent) a r))
 
     -- VariantDecomp<lbl> : (a -> b) -> (<r> -> b) -> <lbl? : a | r> -> b
     Const (VariantDecomp label) ->
@@ -95,10 +106,10 @@ instance TypePrim t (Const VariantPrim) where
       forall Row  $ \r ->
       mono $
         (a ~> b) ~>
-        (Fix (TVariant r) ~> b) ~>
-        (Fix $ TVariant $ Fix $ TRowExtend label p a r) ~> b
+        (typeVariantOf r ~> b) ~>
+        (typeVariantOf $ Fix $ TRowExtend label p a r) ~> b
 
     Const VariantAbsurd ->
       forall Star $ \a ->
       mono $
-        Fix (TVariant (Fix TRowEmpty)) ~> a
+        typeVariantOf (Fix TRowEmpty) ~> a

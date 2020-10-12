@@ -35,6 +35,10 @@ data RecordPrim
 data RecordValue e
   = VRecord (M.Map Label e)
 
+data RecordType
+  = TRecord
+    deriving (Eq, Show)
+
 mkVRecord :: (RecordValue :< v) => M.Map Label (Value v) -> Value v
 mkVRecord = Fix . inject . VRecord
 
@@ -53,6 +57,13 @@ instance Pretty RecordPrim where
     RecordExtend lbl  -> "RecordExtend" <> angles (ppLabel lbl)
     RecordSelect lbl  -> "RecordSelect" <> angles (ppLabel lbl)
     RecordDefault lbl -> "RecordDefault" <> angles (ppLabel lbl)
+
+instance KindOfCtor (Const RecordType) where
+  kindOfCtor = \case
+    Const TRecord   -> Row `Arr` Star
+
+typeRecordOf :: (RecordType :<< t) => Type t -> Type t
+typeRecordOf r = typeCtor TRecord @: r
 
 instance ( Member RuntimeErrorEffect sig
          , Carrier sig m
@@ -92,10 +103,10 @@ instance ( Member RuntimeErrorEffect sig
     where
       projRecord = project @RecordValue . unfix
 
-instance TypePrim t (Const RecordPrim) where
+instance (RecordType :<< t) => TypePrim t (Const RecordPrim) where
   typePrim = \case
     Const RecordNil ->
-      mono $ Fix $ TRecord $ Fix $ TRowEmpty
+      mono $ typeRecordOf $ Fix $ TRowEmpty
     Const (RecordExtend label) ->
       forall Star $ \a ->
       forall Star $ \b ->
@@ -103,16 +114,16 @@ instance TypePrim t (Const RecordPrim) where
       forall Row  $ \r ->
       mono $
         a ~>
-        (Fix $ TRecord $ Fix $ TRowExtend label p b r) ~>
-        (Fix $ TRecord $ Fix $ TRowExtend label (Fix TPresent) a r)
+        (typeRecordOf $ Fix $ TRowExtend label p b r) ~>
+        (typeRecordOf $ Fix $ TRowExtend label (Fix TPresent) a r)
     Const (RecordSelect label) ->
       forall Star $ \a ->
       forall Row  $ \r ->
       mono $
-        (Fix $ TRecord $ Fix $ TRowExtend label (Fix TPresent) a r) ~> a
+        (typeRecordOf $ Fix $ TRowExtend label (Fix TPresent) a r) ~> a
     Const (RecordDefault label) ->
       forall Star $ \a ->
       forall Presence $ \p ->
       forall Row  $ \r ->
       mono $
-        a ~> (Fix $ TRecord $ Fix $ TRowExtend label p a r) ~> a
+        a ~> (typeRecordOf $ Fix $ TRowExtend label p a r) ~> a

@@ -29,7 +29,6 @@ module Types
   , unspine
   , TypePrim(..)
   , KindOfCtor(..)
-  , TypeConstructor
   , TyScheme
   , toType
   , forall
@@ -101,13 +100,9 @@ data TypeF (p :: [*]) e
   | TCtor (Sum' p)
 
   ----------------------------------------------------------------------
-  -- Row typed records and variants
-  | TRecord  e             -- ROW -> STAR
-  | TVariant e             -- ROW -> STAR
-
+  -- Row types
   | TPresent               -- PRESENCE
   | TAbsent                -- PRESENCE
-
   | TRowEmpty              -- ROW
   | TRowExtend Label e e e -- PRESENCE -> STAR -> ROW -> ROW
 
@@ -159,13 +154,6 @@ class KindOfCtor (t :: * -> *) where
 
 instance (Apply KindOfCtor ts) => KindOfCtor (Sum ts) where
   kindOfCtor = apply @KindOfCtor kindOfCtor
-
-type TypeConstructor t =
-  ( Apply Eq1        (Map Const t)
-  , Apply Show1      (Map Const t)
-  , Apply Pretty1    (Map Const t)
-  , Apply KindOfCtor (Map Const t)
-  )
 
 typeCtor :: (t :<< ts) => t -> Type ts
 typeCtor = Fix . TCtor . inject'

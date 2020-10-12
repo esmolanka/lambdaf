@@ -25,6 +25,7 @@ import Control.Effect.Reader
 import Control.Effect.State
 import Control.Effect.Writer
 
+import Data.Functor.Classes
 import Data.Foldable (toList, fold)
 import Data.Functor.Foldable (Fix (..), cata)
 import Data.Maybe
@@ -43,6 +44,17 @@ import Expr
 import Types
 import Utils
 import Pretty
+
+----------------------------------------------------------------------
+
+type TypeConstructor t =
+  ( Apply Eq1        (Map Const t)
+  , Apply Show1      (Map Const t)
+  , Apply PrettyType (Map Const t)
+  , Apply KindOfCtor (Map Const t)
+  )
+
+----------------------------------------------------------------------
 
 trace :: String -> a -> a
 trace = if False then Debug.Trace.trace else flip const
@@ -73,7 +85,7 @@ instance Eq (CtxMember t) where
 newtype Ctx t = Ctx (Seq (CtxMember t))
   deriving (Semigroup, Monoid)
 
-ppCtx :: forall t ann. Apply' Pretty1 t => Ctx t -> Doc ann
+ppCtx :: forall t ann. (TypeConstructor t) => Ctx t -> Doc ann
 ppCtx (Ctx elems) = indent 2 . vsep . map ppMember . toList $ elems
   where
     ppMember :: CtxMember t -> Doc ann
@@ -286,9 +298,6 @@ freshMeta _ k = do
 
     TUnit ≤· TUnit = pure ()
     TVoid ≤· TVoid = pure ()
-
-    TRecord a ≤· TRecord a' = a ≤ a'
-    TVariant a ≤· TVariant a' = a ≤ a'
 
     TPresent ≤· TPresent = pure ()
     TAbsent ≤· TAbsent = pure ()
@@ -574,8 +583,6 @@ inferKind pos = cata (alg <=< sequence)
       TCtor c              -> pure (kindOfCtor c)
 
       -- Row types
-      TRecord Row          -> pure Star
-      TVariant Row         -> pure Star
       TPresent             -> pure Presence
       TAbsent              -> pure Presence
       TRowEmpty            -> pure Row

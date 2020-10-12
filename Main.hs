@@ -44,7 +44,7 @@ import Types (Type)
 ----------------------------------------------------------------------
 -- Concrete language
 
-type TypeCtors  = '[BaseType, KappaType, DynType]
+type TypeCtors  = '[BaseType, KappaType, DynType, RecordType, VariantType]
 type PrimTypes  = '[BasePrim, DynPrim, RecordPrim, VariantPrim, KappaPrim, IOPrim, LinkPrim, ExceptionPrim]
 type ValueTypes = '[LambdaValue (Eval IO), BaseValue, DynValue, RecordValue, VariantValue, KappaValue]
 
