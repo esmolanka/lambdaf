@@ -25,6 +25,8 @@ module Types
   , TypeF(..)
   , Label(..)
   , getRowTail
+  , spine
+  , unspine
   , TypePrim(..)
   , KindOfCtor(..)
   , TypeConstructor
@@ -37,10 +39,14 @@ module Types
   , typeCtor
   ) where
 
+import Control.Effect
+import Control.Effect.Reader
 import Control.Monad
+
 import Data.Functor.Classes
 import Data.Functor.Classes.Generic
-import Data.Functor.Foldable (Fix(..), cata)
+import Data.Functor.Foldable (Fix(..), cata, para)
+import Data.List
 import Data.String
 import Data.Sum
 import Data.Text (Text)
@@ -123,6 +129,22 @@ getRowTail =
     TRowExtend _ _ _ x -> x
     TRef v -> Just v
     other -> msum other
+
+spine :: Type t -> (Type t, [Type t])
+spine expr = run . runReader [] $ (para alg expr)
+  where
+    alg :: TypeF t (Type t, ReaderC [Type t] PureC (Type t, [Type t])) -> ReaderC [Type t] PureC (Type t, [Type t])
+    alg = \case
+      TApp (_, f) (r, _) ->
+        local (r :) f
+      other -> do
+        collected <- ask
+        return (Fix (fmap fst other), collected)
+
+unspine :: Type t -> [Type t] -> Type t
+unspine f args =
+  foldl' ((Fix .) . TApp) f args
+
 
 ----------------------------------------------------------------------
 -- Prims typing algebra

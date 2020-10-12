@@ -11,13 +11,17 @@
 
 module Pretty where
 
+import Control.Category ((>>>))
 import Control.Effect.Reader
 
 import Data.Functor.Classes
 import Data.Functor.Const
 import Data.Functor.Foldable (Fix(..), para)
 import Data.Sum
-import Data.Text.Prettyprint.Doc as PP
+import qualified Data.Text as T
+import Data.Text.Prettyprint.Doc
+import qualified Data.Text.Prettyprint.Doc.Render.Text as ToText
+
 import Data.Void
 
 import Errors
@@ -63,44 +67,67 @@ ppMetaVar (MetaVar n k) = ppPrefix k <> pretty n
     ppPrefix EStack   = "'τ"
     ppPrefix Region   = "'σ"
 
-ppType :: (Pretty1 (Sum (Map Const t))) => Type t -> Doc ann
-ppType = (group .) . para $ \case
-  TUnit -> "()"
-  TVoid -> "∅"
+ppType :: forall t ann. (Pretty1 (Sum (Map Const t))) => Type t -> Doc ann
+ppType = ppType' 0
+  where
+    parensIf :: Bool -> Doc ann -> Doc ann
+    parensIf True = parens
+    parensIf False = id
 
-  TCtor name -> liftPretty absurd name
+    ppSpine :: TypeF t (Type t) -> [Type t] -> Doc ann
+    ppSpine f args = hsep (ppTypeCon 1 f : map (ppType' 2) args)
 
-  TApp (_,a) (_,b) -> parens (a <+> b)
+    ppTypeCon :: Int -> TypeF t (Type t) -> Doc ann
+    ppTypeCon lvl = \case
+      TUnit      -> "unit"
+      TVoid      -> "void"
+      TRef tv    -> ppTyVar tv
+      TMeta tv   -> ppMetaVar tv
 
-  TRef tv -> ppTyVar tv
-  TMeta tv -> ppMetaVar tv
-  TForall tv (_,e) -> parens ("∀" <+> ppTyVar tv <> "." <+> e)
-  TExists tv (_,e) -> parens ("∃" <+> ppTyVar tv <> "." <+> e)
-  TArrow (f',f) (_,a) ->
-    case f' of
-      Fix (TArrow{}) -> parens f <+> "→" <+> a
-      _other         -> f <+>  "→" <+> a
+      TArrow a b ->
+        parensIf (lvl > 0) $ group $ ppType' 1 a <> line <> "→" <+> ppType' 0 b
 
-  TRecord (_,row)   -> group $ braces $ space <> align (row <> space)
-  TVariant (_,row)  -> group $ angles $ space <> align (row <> space)
-  TPresent -> "▪︎"
-  TAbsent -> "▫︎"
-  TRowEmpty -> "∅"
-  TRowExtend lbl (p',_) (f',f) (t',t) ->
-    let label = case p' of
-          Fix TPresent -> ppLabel lbl
-          Fix TAbsent  -> "¬" <> ppLabel lbl
-          other        -> ppLabel lbl <> "^" <> ppType other
+      TForall tv e  -> parensIf (lvl > 0) ("∀" <+> ppTyVar tv <> "." <+> ppType' 0 e)
+      TExists tv e  -> parensIf (lvl > 0) ("∃" <+> ppTyVar tv <> "." <+> ppType' 0 e)
 
-        field = case (f', p') of
-          (Fix TUnit, _) -> label
-          (_, Fix TAbsent)   -> label
-          _                  -> label <+> ":" <+> f
+      TCtor name    -> liftPretty absurd name
 
-    in case t' of
-         Fix (TRowEmpty) -> field
-         Fix (TRef{})    -> field <+> "|" <+> t
-         Fix _           -> vsep [ field <> ",", t ]
+      TRecord row   -> group $ braces $ space <> align (ppType' 0 row <> space)
+      TVariant row  -> group $ angles $ space <> align (ppType' 0 row <> space)
+
+      TApp f a      -> parensIf (lvl > 1) $ ppType' 1 f <+> ppType' 2 a
+
+      TPresent      -> "▪︎"
+      TAbsent       -> "▫︎"
+      TRowEmpty     -> "Nil"
+
+      TRowExtend lbl p' f' t' ->
+        let label = case p' of
+              Fix TPresent -> ppLabel lbl
+              Fix TAbsent  -> "¬" <> ppLabel lbl
+              other        -> ppLabel lbl <> "^" <> ppType other
+
+            field = case (f', p') of
+              (Fix TUnit, _) -> label
+              (_, Fix TAbsent)   -> label
+              _                  -> label <+> ":" <+> ppType' 0 f'
+
+        in case t' of
+             Fix (TRowEmpty) -> field
+             Fix (TRef{})    -> field <+> "|" <+> ppType' 0 t'
+             Fix _           -> vsep [ field <> ",", ppType' 0 t' ]
+
+
+    ppType' :: Int -> Type t -> Doc ann
+    ppType' lvl = spine >>> \case
+      (Fix otherTyCon, []) ->
+        ppTypeCon lvl otherTyCon
+
+      (Fix otherTyCon, rest) ->
+        parensIf (lvl > 1) $ group $ nest 2 $ ppSpine otherTyCon rest
+
+----------------------------------------------------------------------
+-- Errors
 
 ppError :: (Pretty1 (Sum (Map Const t)), Show1 (TypeF t)) => TCError t -> Doc ann
 ppError (TCError pos reason) =
@@ -196,4 +223,9 @@ ppValue (Fix x) = liftPretty ppValue x
 ----------------------------------------------------------------------
 
 render :: Doc ann -> String
-render = show -- FIXME: use proper rendering function
+render =
+  T.unpack . ToText.renderStrict . layoutSmart defaultLayoutOptions
+
+renderDoc :: Doc ann -> T.Text
+renderDoc =
+  ToText.renderStrict . layoutSmart defaultLayoutOptions
