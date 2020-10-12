@@ -37,10 +37,10 @@ import qualified Prim.Base as Raw (BasePrim(..), BaseType(..))
 import qualified Prim.Dyn as Raw (DynPrim(..))
 import qualified Prim.Exception as Raw (ExceptionPrim(..))
 import qualified Prim.IO as Raw (IOPrim(..))
+import qualified Prim.Kappa as Raw (KappaPrim(..), EPrim(..), KappaType(..))
 import qualified Prim.Link.Types as Raw (LinkPrim(..))
 import qualified Prim.Record as Raw (RecordPrim(..))
 import qualified Prim.Variant as Raw (VariantPrim(..))
-import qualified Prim.Kappa as Raw (KappaPrim(..), EPrim(..), KappaType(..))
 import qualified Syntax.Position as Raw
 import Types
 import Utils
@@ -92,16 +92,16 @@ dsPos :: Position -> Raw.Position
 dsPos (Position fn l c) = Raw.Position (pack fn) l c l c
 
 desugar :: forall t p.
-  ( Raw.BasePrim :<< p
-  , Raw.DynPrim :<< p
-  , Raw.RecordPrim :<< p
-  , Raw.VariantPrim :<< p
-  , Raw.IOPrim :<< p
-  , Raw.KappaPrim :<< p
-  , Raw.LinkPrim :<< p
+  ( Raw.BasePrim      :<< p
+  , Raw.DynPrim       :<< p
   , Raw.ExceptionPrim :<< p
-  , Raw.BaseType :<< t
-  , Raw.KappaType :<< t
+  , Raw.IOPrim        :<< p
+  , Raw.KappaPrim     :<< p
+  , Raw.LinkPrim      :<< p
+  , Raw.RecordPrim    :<< p
+  , Raw.VariantPrim   :<< p
+  , Raw.BaseType      :<< t
+  , Raw.KappaType     :<< t
   ) => Sugared -> Raw.Expr t p
 desugar = resolvePrimitives . futu coalg
   where
@@ -263,12 +263,12 @@ desugar = resolvePrimitives . futu coalg
                handlers
 
 primitives :: forall p proxy.
-  ( Raw.BasePrim :<< p
-  , Raw.DynPrim :<< p
-  , Raw.IOPrim :<< p
-  , Raw.KappaPrim :<< p
-  , Raw.LinkPrim :<< p
+  ( Raw.BasePrim      :<< p
+  , Raw.DynPrim       :<< p
   , Raw.ExceptionPrim :<< p
+  , Raw.IOPrim        :<< p
+  , Raw.KappaPrim     :<< p
+  , Raw.LinkPrim      :<< p
   ) => proxy p -> M.Map Variable (Int, Sum' p)
 primitives _ = M.fromList
   [ (Variable "+",           (0, inject' Raw.Add))
@@ -298,29 +298,29 @@ primitives _ = M.fromList
   , (Variable "raise",       (0, inject' Raw.RaiseExc))
 
     -- Kappa
-  , (Variable "^bool",       (0, inject' Raw.KConstBool))
-  , (Variable "^dbl",        (0, inject' Raw.KConstDbl))
-  , (Variable "^vec",        (0, inject' Raw.KConstVec))
-  , (Variable "^add",        (0, inject' (Raw.KPrim Raw.EAdd)))
-  , (Variable "^mul",        (0, inject' (Raw.KPrim Raw.EMul)))
-  , (Variable "^sub",        (0, inject' (Raw.KPrim Raw.ESub)))
-  , (Variable "^div",        (0, inject' (Raw.KPrim Raw.EDiv)))
-  , (Variable "^fold",       (0, inject' (Raw.KPrim Raw.EFold)))
-  , (Variable "^map",        (0, inject' (Raw.KPrim Raw.EMap)))
-  , (Variable "^branch",     (0, inject' (Raw.KPrim Raw.EBranch)))
-  , (Variable "^loop",       (0, inject' Raw.KLoop))
+  , (Variable "k/bool",      (0, inject' Raw.KConstBool))
+  , (Variable "k/dbl",       (0, inject' Raw.KConstDbl))
+  , (Variable "k/vec",       (0, inject' Raw.KConstVec))
+  , (Variable "k/+",         (0, inject' (Raw.KPrim Raw.EAdd)))
+  , (Variable "k/*",         (0, inject' (Raw.KPrim Raw.EMul)))
+  , (Variable "k/-",         (0, inject' (Raw.KPrim Raw.ESub)))
+  , (Variable "k/%",         (0, inject' (Raw.KPrim Raw.EDiv)))
+  , (Variable "k/fold",      (0, inject' (Raw.KPrim Raw.EFold)))
+  , (Variable "k/map",       (0, inject' (Raw.KPrim Raw.EMap)))
+  , (Variable "k/if",        (0, inject' (Raw.KPrim Raw.EBranch)))
+  , (Variable "k/loop",      (0, inject' Raw.KLoop))
   ]
 
 resolvePrimitives ::
   forall t p.
-  ( Raw.BasePrim :<< p
-  , Raw.DynPrim :<< p
-  , Raw.IOPrim :<< p
-  , Raw.KappaPrim :<< p
-  , Raw.LinkPrim :<< p
+  ( Raw.BasePrim      :<< p
+  , Raw.DynPrim       :<< p
   , Raw.ExceptionPrim :<< p
-  , Raw.BaseType :<< t
-  , Raw.KappaType :<< t
+  , Raw.IOPrim        :<< p
+  , Raw.KappaPrim     :<< p
+  , Raw.LinkPrim      :<< p
+  , Raw.BaseType      :<< t
+  , Raw.KappaType     :<< t
   ) => Raw.Expr t p -> Raw.Expr t p
 resolvePrimitives expr = run . runReader (primitives (Proxy @p)) $ cata alg expr
   where
