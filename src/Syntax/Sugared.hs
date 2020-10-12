@@ -308,8 +308,6 @@ primitives _ = M.fromList
   , (Variable "^fold",       (0, inject' (Raw.KPrim Raw.EFold)))
   , (Variable "^map",        (0, inject' (Raw.KPrim Raw.EMap)))
   , (Variable "^branch",     (0, inject' (Raw.KPrim Raw.EBranch)))
-  , (Variable "^head",       (0, inject' Raw.KFirst))
-  , (Variable "^tail",       (0, inject' Raw.KRest))
   , (Variable "^loop",       (0, inject' Raw.KLoop))
   ]
 

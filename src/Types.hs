@@ -68,7 +68,6 @@ data Kind
   | Row
   | Presence
   | EStar
-  | EStack
   deriving (Show, Eq, Ord)
 
 infixr 3 `Arr`

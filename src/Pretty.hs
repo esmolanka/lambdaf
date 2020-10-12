@@ -42,7 +42,6 @@ ppKind Star     = "⋆"
 ppKind Row      = "Ω"
 ppKind Presence = "Ψ"
 ppKind EStar    = "⊛"
-ppKind EStack   = "Σ"
 ppKind Region   = "Ξ"
 
 ppTyVar :: TVar -> Doc ann
@@ -53,7 +52,6 @@ ppTyVar (TVar n k) = ppPrefix k <> pretty n
     ppPrefix Row      = "ρ"
     ppPrefix Presence = "ω"
     ppPrefix EStar    = "β"
-    ppPrefix EStack   = "τ"
     ppPrefix Region   = "σ"
 
 ppMetaVar :: MetaVar -> Doc ann
@@ -64,7 +62,6 @@ ppMetaVar (MetaVar n k) = ppPrefix k <> pretty n
     ppPrefix Row      = "'ρ"
     ppPrefix Presence = "'ω"
     ppPrefix EStar    = "'β"
-    ppPrefix EStack   = "'τ"
     ppPrefix Region   = "'σ"
 
 ppType :: forall t ann. (Pretty1 (Sum (Map Const t))) => Type t -> Doc ann
