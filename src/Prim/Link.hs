@@ -39,7 +39,8 @@ import Prim.Kappa
 import Prim.Link.Types
 import Prim.Record
 import Prim.Variant
-import Syntax.Sugared
+import Syntax.Desugar (desugar)
+import Syntax.Grammar (sugaredGrammar)
 import TypeChecker
 import Types
 import Utils

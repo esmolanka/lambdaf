@@ -30,6 +30,8 @@ library
     Prim.Link.Types
     Prim.Record
     Prim.Variant
+    Syntax.Desugar
+    Syntax.Grammar
     Syntax.Position
     Syntax.Sugared
     TypeChecker
