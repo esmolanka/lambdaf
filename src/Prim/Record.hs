@@ -12,10 +12,10 @@
 
 module Prim.Record where
 
-import Control.Effect.Carrier
+import Control.Algebra
 
 import Data.Functor.Const
-import Data.Functor.Foldable (Fix (..), unfix)
+import Data.Fix (Fix (..))
 import qualified Data.Map as M
 import Data.Sum
 import Data.Text.Prettyprint.Doc as PP
@@ -72,8 +72,7 @@ instance KindOfCtor (Const RecordType) where
 typeRecordOf :: (RecordType :<< t) => Type t -> Type t
 typeRecordOf r = typeCtor TRecord @: r
 
-instance ( Member RuntimeErrorEffect sig
-         , Carrier sig m
+instance ( Has RuntimeErrorEffect sig m
          , LambdaValue m :< v
          , RecordValue :< v
          ) => EvalPrim m v (Const RecordPrim) where
@@ -108,7 +107,7 @@ instance ( Member RuntimeErrorEffect sig
             _ -> evalError "RecordDefault: not a record"
 
     where
-      projRecord = project @RecordValue . unfix
+      projRecord = project @RecordValue . unFix
 
 instance (RecordType :<< t) => TypePrim t (Const RecordPrim) where
   typePrim = \case

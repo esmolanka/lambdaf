@@ -12,10 +12,10 @@
 
 module Prim.Variant where
 
-import Control.Effect.Carrier
+import Control.Algebra
 
 import Data.Functor.Const
-import Data.Functor.Foldable (Fix (..), unfix)
+import Data.Fix (Fix (..))
 import Data.Sum
 import Data.Text.Prettyprint.Doc as PP
 
@@ -65,8 +65,7 @@ instance KindOfCtor (Const VariantType) where
 typeVariantOf :: (VariantType :<< t) => Type t -> Type t
 typeVariantOf r = typeCtor TVariant @: r
 
-instance ( Member RuntimeErrorEffect sig
-         , Carrier sig m
+instance ( Has RuntimeErrorEffect sig m
          , LambdaValue m :< v
          , VariantValue :< v
          ) => EvalPrim m v (Const VariantPrim) where
@@ -95,7 +94,7 @@ instance ( Member RuntimeErrorEffect sig
         evalError "VariantAbsurd: constructed absurd"
 
     where
-      projVariant = project @VariantValue . unfix
+      projVariant = project @VariantValue . unFix
 
 instance (VariantType :<< t) => TypePrim t (Const VariantPrim) where
   typePrim = \case

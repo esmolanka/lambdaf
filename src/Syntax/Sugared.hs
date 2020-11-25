@@ -12,7 +12,7 @@ module Syntax.Sugared where
 
 import Prelude hiding (id)
 
-import Data.Functor.Foldable (Fix(..))
+import Data.Fix (Fix (..))
 import Data.Text (Text)
 import GHC.Generics
 import Language.Sexp.Located (Position(..))

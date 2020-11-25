@@ -18,16 +18,17 @@ module TypeChecker (runInfer, check, inferExprType) where
 
 import Control.Monad
 
-import Control.Effect.Carrier
-import Control.Effect.Error
-import Control.Effect.Pure
-import Control.Effect.Reader
-import Control.Effect.State
-import Control.Effect.Writer
+import Control.Algebra
+import Control.Carrier.Error.Either
+import Control.Carrier.Reader
+import Control.Carrier.State.Strict
+import Control.Carrier.Writer.Strict
 
-import Data.Functor.Classes
+import Data.Fix (Fix (..))
 import Data.Foldable (toList, fold)
-import Data.Functor.Foldable (Fix (..), cata)
+import Data.Functor.Classes
+import Data.Functor.Foldable (cata)
+import Data.Functor.Identity
 import Data.Maybe
 import Data.Monoid (All(..), Any(..))
 import Data.Proxy
@@ -161,7 +162,7 @@ ctxUnsolved (Ctx ctx) =
 (⊢) :: forall t. Ctx t -> Type t -> Either (Reason t) ()
 (⊢) ctx0 ty = run $ runReader ctx0 $ runError (cata alg ty)
   where
-    alg :: (Member (Error (Reason t)) sig, Member (Reader (Ctx t)) sig, Carrier sig m) =>
+    alg :: (Has (Error (Reason t)) sig m, Has (Reader (Ctx t)) sig m) =>
            TypeF t (m ()) -> m ()
     alg t = do
       ctx <- ask @(Ctx t)
@@ -204,11 +205,10 @@ subst (v, s) = cata alg
 
 ----------------------------------------------------------------------
 
-type TypeChecking t sig =
-  ( Member (State (CheckState t)) sig
-  , Member (Error (TCError t)) sig
-  , Member (Reader Position) sig
-  , Effect sig
+type TypeChecking t sig m =
+  ( Has (State (CheckState t)) sig m
+  , Has (Error (TCError t)) sig m
+  , Has (Reader Position) sig m
   )
 
 data CheckState t = CheckState
@@ -219,28 +219,28 @@ data CheckState t = CheckState
 defCheckState :: CheckState t
 defCheckState = CheckState mempty 1
 
-getCtx :: forall t sig m. (TypeChecking t sig, Carrier sig m) => m (Ctx t)
+getCtx :: forall t sig m. (TypeChecking t sig m) => m (Ctx t)
 getCtx = gets @(CheckState t) checkCtx
 
-putCtx :: forall t sig m. (TypeChecking t sig, Carrier sig m) => Ctx t -> m ()
+putCtx :: forall t sig m. (TypeChecking t sig m) => Ctx t -> m ()
 putCtx ctx = get @(CheckState t) >>= \s -> put @(CheckState t) s { checkCtx = ctx }
 
-modifyCtx :: (TypeChecking t sig, Carrier sig m) => (Ctx t -> Ctx t) -> m ()
+modifyCtx :: (TypeChecking t sig m) => (Ctx t -> Ctx t) -> m ()
 modifyCtx f = putCtx . f =<< getCtx
 
-freshMeta :: forall t sig m proxy. (TypeChecking t sig, Carrier sig m) => proxy t -> Kind -> m MetaVar
+freshMeta :: forall t sig m proxy. (TypeChecking t sig m) => proxy t -> Kind -> m MetaVar
 freshMeta _ k = do
   n <- gets @(CheckState t) checkNextEVar
   modify @(CheckState t) (\s -> s { checkNextEVar = checkNextEVar s + 1 })
   pure $ MetaVar n k
 
-(≤) :: forall t sig m. (TypeChecking t sig, Carrier sig m, TypeConstructor t) => Type t -> Type t -> m ()
+(≤) :: forall t sig m. (TypeChecking t sig m, TypeConstructor t) => Type t -> Type t -> m ()
 (≤) (Fix typeA) (Fix typeB) =
   getCtx @t >>= \ctx ->
     trace (render $ vsep [ "Checking:" <+> ppType (Fix typeA) <+> "≤" <+> ppType (Fix typeB), ppCtx ctx ]) $
       runReader id (typeA ≤⋆ typeB)
   where
-    (≤⋆) :: (TypeChecking t sig, Carrier sig m) => TypeF t (Type t) -> TypeF t (Type t) -> ReaderC (m () -> m ()) m ()
+    (≤⋆) :: (TypeChecking t sig m) => TypeF t (Type t) -> TypeF t (Type t) -> ReaderC (m () -> m ()) m ()
     a ≤⋆ TForall v (Fix b) = do
       modifyCtx @t (▸ CtxVar v)
       a ≤⋆ b
@@ -277,7 +277,7 @@ freshMeta _ k = do
       ask @(m () -> m ()) >>= \wrapper ->
         ReaderC (\_ -> wrapper (monoA ≤· monoB))
 
-    (≤·) :: (TypeChecking t sig, Carrier sig m) => TypeF t (Type t) -> TypeF t (Type t) -> m ()
+    (≤·) :: (TypeChecking t sig m) => TypeF t (Type t) -> TypeF t (Type t) -> m ()
     TRef a   ≤· TRef b  | a == b = return ()
     TMeta a  ≤· TMeta b | a == b = return ()
     TCtor a  ≤· TCtor b | a == b = return ()
@@ -320,7 +320,7 @@ freshMeta _ k = do
       throwError $ TCError pos $ CannotUnify (Fix a) (Fix b)
 
 rewriteRow
-  :: forall t sig m. (TypeChecking t sig, Carrier sig m, TypeConstructor t) =>
+  :: forall t sig m. (TypeChecking t sig m, TypeConstructor t) =>
      Position -> Label -> Label -> Type t -> Type t -> Type t -> m (Type t, Type t, Type t)
 rewriteRow pos newLbl lbl pty fty tail_ =
   if newLbl == lbl
@@ -358,10 +358,10 @@ opposite = \case
   Flex -> Rigid
   Rigid -> Flex
 
-instantiate :: forall t sig m. (TypeChecking t sig, Carrier sig m, TypeConstructor t) => Direction -> MetaVar -> Type t -> m ()
+instantiate :: forall t sig m. (TypeChecking t sig m, TypeConstructor t) => Direction -> MetaVar -> Type t -> m ()
 instantiate dir0 ma0 t0 = inst dir0 ma0 t0
   where
-    inst :: (TypeChecking t sig, Carrier sig m) => Direction -> MetaVar -> Type t -> m ()
+    inst :: (TypeChecking t sig m) => Direction -> MetaVar -> Type t -> m ()
     inst dir ma t = getCtx >>= go
       where
         -- Inst*Solve
@@ -430,8 +430,7 @@ instantiate dir0 ma0 t0 = inst dir0 ma0 t0
 
 check
   :: forall t p sig m.
-     ( TypeChecking t sig
-     , Carrier sig m
+     ( TypeChecking t sig m
      , TypePrim t (Sum (Map Const p))
      , TypeConstructor t
      )
@@ -465,8 +464,7 @@ check e b = do
 
 infer
   :: forall t p sig m.
-     ( TypeChecking t sig
-     , Carrier sig m
+     ( TypeChecking t sig m
      , TypePrim t (Sum (Map Const p))
      , TypeConstructor t
      )
@@ -522,8 +520,7 @@ infer (Fix (Prim _ c)) =
 
 inferApp
   :: forall t p sig m.
-     ( TypeChecking t sig
-     , Carrier sig m
+     ( TypeChecking t sig m
      , TypePrim t (Sum (Map Const p))
      , TypeConstructor t
      )
@@ -561,7 +558,7 @@ inferApp t e =
 
 ----------------------------------------------------------------------
 
-inferKind :: forall t sig m. (TypeChecking t sig, Carrier sig m, TypeConstructor t) => Position -> Type t -> m Kind
+inferKind :: forall t sig m. (TypeChecking t sig m, TypeConstructor t) => Position -> Type t -> m Kind
 inferKind pos = cata (alg <=< sequence)
   where
     alg :: TypeF t Kind -> m Kind
@@ -593,15 +590,14 @@ inferKind pos = cata (alg <=< sequence)
 
 ----------------------------------------------------------------------
 
-type InferM t = ErrorC (TCError t) (StateC (CheckState t) (ReaderC Position PureC))
+type InferM t = ErrorC (TCError t) (StateC (CheckState t) (ReaderC Position Identity))
 
 runInfer :: forall t a. InferM t a -> Either (TCError t) a
-runInfer = runPureC . runReader dummyPos . evalState defCheckState . runError
+runInfer = run . runReader dummyPos . evalState defCheckState . runError
 
 inferExprType
   :: forall t m sig p.
-     ( TypeChecking t sig
-     , Carrier sig m
+     ( TypeChecking t sig m
      , TypePrim t (Sum (Map Const p))
      , TypeConstructor t
      ) => Expr t p -> m (Type t)

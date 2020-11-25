@@ -26,10 +26,10 @@ module Prim.Base
   , typePairOf
   ) where
 
-import Control.Effect.Carrier
+import Control.Algebra
 
 import Data.Functor.Const
-import Data.Functor.Foldable (Fix (..), unfix)
+import Data.Fix (Fix (..))
 import Data.Sum
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -119,7 +119,7 @@ mkVUnit :: (BaseValue :< v) => Value v
 mkVUnit = Fix . inject $ VUnit
 
 projBase :: (BaseValue :< v) => Value v -> Maybe (BaseValue (Value v))
-projBase = project @BaseValue . unfix
+projBase = project @BaseValue . unFix
 
 instance Pretty1 BaseValue where
   liftPretty pp = \case
@@ -147,8 +147,7 @@ instance Pretty BasePrim where
     (MkText s)  -> pretty (show s)
     MkUnit      -> "Unit"
 
-instance ( Member RuntimeErrorEffect sig
-         , Carrier sig m
+instance ( Has RuntimeErrorEffect sig m
          , LambdaValue m :< v
          , BaseValue :< v
          ) => EvalPrim m v (Const BasePrim) where

@@ -14,14 +14,13 @@ module Syntax.Grammar (sugaredGrammar) where
 
 import Prelude hiding (id)
 
-import Control.Category (id, (>>>))
+import Control.Category (id)
 
 import Data.Char (isUpper)
 import Data.Coerce
-import Data.Functor.Foldable (Fix(..))
+import Data.Fix (Fix (..))
 import Data.Text (Text, uncons)
 
-import Language.Sexp.Located (Position(..))
 import Language.SexpGrammar
 import Language.SexpGrammar.Generic
 

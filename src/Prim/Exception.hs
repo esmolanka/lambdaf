@@ -17,11 +17,12 @@ module Prim.Exception
   , ExceptionPrim (..)
   ) where
 
-import Control.Effect.Carrier
+import Control.Algebra
 import Control.Effect.Error
+import Control.Carrier.Error.Either
 
 import Data.Functor.Const
-import Data.Functor.Foldable (Fix (..), unfix)
+import Data.Fix (Fix (..))
 import Data.Sum
 
 import Expr
@@ -45,9 +46,8 @@ instance Pretty ExceptionPrim where
     RaiseExc -> "RaiseExc"
     CatchExc -> "CatchExc"
 
-instance ( Member (RuntimeErrorEffect) sig
-         , Member (ExceptionEffect v) sig
-         , Carrier sig m
+instance ( Has (RuntimeErrorEffect) sig m
+         , Has (ExceptionEffect v) sig m
          , LambdaValue m :< v
          , BaseValue :< v
          ) => EvalPrim m v (Const ExceptionPrim) where
@@ -68,7 +68,7 @@ instance ( Member (RuntimeErrorEffect) sig
             Nothing -> evalError "Action is not a function"
     where
       projLam :: (LambdaValue m :< v) => Value v -> Maybe (LambdaValue m (Value v))
-      projLam = project @(LambdaValue m) . unfix
+      projLam = project @(LambdaValue m) . unFix
 
 instance TypePrim t (Const ExceptionPrim) where
   typePrim = \case

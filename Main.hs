@@ -11,12 +11,11 @@ module Main (main) where
 import qualified System.IO as IO
 import System.Exit
 
-import Control.Effect
-import Control.Effect.Carrier
-import Control.Effect.Error
+import Control.Algebra
+import Control.Carrier.Lift
+import Control.Effect.Fail
 import Control.Monad (unless, forM_)
 import Control.Monad.IO.Class
-import Control.Monad.Fail (MonadFail)
 
 import qualified Data.ByteString.Lazy.Char8 as B8
 import Data.Text.Prettyprint.Doc
@@ -53,7 +52,7 @@ newtype Eval m a = Eval
   { unEval :: RuntimeErrorEffectC (DynEffectC ValueTypes (ExceptionEffectC ValueTypes (EnvEffectC ValueTypes (KappaEffectC (LiftC m))))) a
   } deriving (Functor, Applicative, Monad, MonadIO, MonadFail)
 
-instance (MonadIO m) => Carrier
+instance (MonadIO m) => Algebra
     ( RuntimeErrorEffect
       :+: Fail
       :+: DynAllocEffect
@@ -63,7 +62,7 @@ instance (MonadIO m) => Carrier
       :+: KappaEffect
       :+: Lift m
     ) (Eval m) where
-  eff x = Eval $ eff (hmap unEval x)
+  alg hdl sig ctx = Eval $ alg (unEval . hdl) sig ctx
 
 runEval :: Eval IO a -> IO (Either String a)
 runEval k = do

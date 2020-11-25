@@ -29,9 +29,12 @@ module Eval
   ) where
 
 import Control.Monad (join)
+import Control.Algebra
 import Control.Effect.Error
-import Control.Effect.Fail
 import Control.Effect.Reader
+import Control.Carrier.Error.Either
+import Control.Carrier.Fail.Either
+import Control.Carrier.Reader
 
 import Data.Coerce
 import Data.Functor.Const
@@ -47,7 +50,7 @@ newtype RuntimeError = RuntimeError String
 type RuntimeErrorEffect = Error RuntimeError
 type RuntimeErrorEffectC m = ErrorC RuntimeError (FailC m)
 
-evalError :: (Member RuntimeErrorEffect sig, Carrier sig m) => String -> m a
+evalError :: (Has RuntimeErrorEffect sig m) => String -> m a
 evalError = throwError . RuntimeError . ("Runtime error: " ++)
 
 runRuntimeError :: (Monad m) => RuntimeErrorEffectC m a -> m (Either String a)
@@ -60,10 +63,10 @@ type EnvEffectC v = ReaderC (Env v)
 runEnv :: EnvEffectC v m a -> m a
 runEnv = runReader (Env M.empty)
 
-localEnv :: (Member (EnvEffect v) sig, Carrier sig m) => (M.Map Variable (Value v) -> M.Map Variable (Value v)) -> m a -> m a
+localEnv :: (Has (EnvEffect v) sig m) => (M.Map Variable (Value v) -> M.Map Variable (Value v)) -> m a -> m a
 localEnv f = local (\(Env m) -> Env . f $ m)
 
-askEnv :: (Member (EnvEffect v) sig, Carrier sig m) => Variable -> m (Maybe (Value v))
+askEnv :: (Has (EnvEffect v) sig m) => Variable -> m (Maybe (Value v))
 askEnv x = asks (\(Env m) -> M.lookup x m)
 
 class EvalPrim m v (p :: * -> *) where
@@ -73,10 +76,9 @@ instance (Apply (EvalPrim m v) ps) => EvalPrim m v (Sum ps) where
   evalPrim = apply @(EvalPrim m v) evalPrim
 
 eval :: forall m sig (t :: [*]) (p :: [*]) (v :: [* -> *]).
-  ( Member RuntimeErrorEffect sig
-  , Member (EnvEffect v) sig
+  ( Has RuntimeErrorEffect sig m
+  , Has (EnvEffect v) sig m
   , MonadFail m
-  , Carrier sig m
   , EvalPrim m v (Sum (Map Const p))
   , LambdaValue m :< v
   ) => Expr t p -> m (Value v)

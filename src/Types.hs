@@ -38,13 +38,16 @@ module Types
   , typeCtor
   ) where
 
-import Control.Effect
+import Control.Algebra
 import Control.Effect.Reader
+import Control.Carrier.Reader
 import Control.Monad
 
+import Data.Functor.Identity
 import Data.Functor.Classes
 import Data.Functor.Classes.Generic
-import Data.Functor.Foldable (Fix(..), cata, para)
+import Data.Fix (Fix(..))
+import Data.Functor.Foldable (cata, para)
 import Data.List
 import Data.String
 import Data.Sum
@@ -127,7 +130,7 @@ getRowTail =
 spine :: Type t -> (Type t, [Type t])
 spine expr = run . runReader [] $ (para alg expr)
   where
-    alg :: TypeF t (Type t, ReaderC [Type t] PureC (Type t, [Type t])) -> ReaderC [Type t] PureC (Type t, [Type t])
+    alg :: TypeF t (Type t, ReaderC [Type t] Identity (Type t, [Type t])) -> ReaderC [Type t] Identity (Type t, [Type t])
     alg = \case
       TApp (_, f) (r, _) ->
         local (r :) f

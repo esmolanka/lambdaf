@@ -23,7 +23,7 @@ module Expr
   , projLambda
   ) where
 
-import Data.Functor.Foldable (Fix (..), unfix)
+import Data.Fix (Fix (..))
 import Data.Sum
 import qualified Data.Text as T
 
@@ -62,7 +62,7 @@ mkVLam :: forall m v. (LambdaValue m :< v) => (Value v -> m (Value v)) -> Value 
 mkVLam x = Fix . inject $ VLam x
 
 projLambda :: forall m v. (LambdaValue m :< v) => Value v -> Maybe (Value v -> m (Value v))
-projLambda = fmap (\(VLam f) -> f) . project @(LambdaValue m) . unfix
+projLambda = fmap (\(VLam f) -> f) . project @(LambdaValue m) . unFix
 
 instance Pretty1 (LambdaValue m) where
   liftPretty _pp = \case

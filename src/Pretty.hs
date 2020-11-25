@@ -13,9 +13,11 @@ module Pretty where
 
 import Control.Category ((>>>))
 import Control.Effect.Reader
+import Control.Carrier.Reader
 
 import Data.Functor.Classes
-import Data.Functor.Foldable (Fix(..), para)
+import Data.Fix (Fix(..))
+import Data.Functor.Foldable (para)
 import Data.Sum
 import qualified Data.Text as T
 import Data.Text.Prettyprint.Doc
@@ -184,7 +186,7 @@ ppExpr = run . runReader @Int 0 . para alg
       True -> parens
       False -> id
 
-    alg :: forall m sig. (Member (Reader Int) sig, Carrier sig m) =>
+    alg :: forall m sig. (Has (Reader Int) sig m) =>
            ExprF t p (Expr t p, m (Doc ann)) -> m (Doc ann)
     alg = \case
       Ref _ x ->

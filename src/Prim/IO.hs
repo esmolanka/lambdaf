@@ -15,11 +15,11 @@ module Prim.IO
   , ioEff
   ) where
 
+import Control.Algebra
 import Control.Monad.IO.Class
-import Control.Effect.Carrier
 
+import Data.Fix (Fix (..))
 import Data.Functor.Const
-import Data.Functor.Foldable (Fix (..))
 import Data.Sum
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
@@ -39,8 +39,7 @@ instance Pretty IOPrim where
     ReadLn  -> "ReadLn"
     WriteLn -> "WriteLn"
 
-instance ( Member RuntimeErrorEffect sig
-         , Carrier sig m
+instance ( Has RuntimeErrorEffect sig m
          , MonadIO m
          , LambdaValue m :< v
          , BaseValue :< v

@@ -22,13 +22,14 @@ module Prim.Dyn
   , DynPrim(..)
   ) where
 
-import Control.Effect.Carrier
-import Control.Effect.Fail
+import Control.Algebra
 import Control.Effect.State
 import Control.Effect.Reader
+import Control.Carrier.State.Strict
+import Control.Carrier.Reader
 
+import Data.Fix (Fix (..))
 import Data.Functor.Const
-import Data.Functor.Foldable (Fix (..), unfix)
 import Data.IntMap (IntMap)
 import qualified Data.IntMap as IM
 import Data.Sum
@@ -53,9 +54,9 @@ updateEnv (DVar n) v (DynEnv m) = DynEnv (IM.insert n v m)
 
 newtype DynState = DynState Int
 
-type WithDynEffect v sig =
-  ( Member (Reader (DynEnv v)) sig
-  , Member (State DynState) sig
+type WithDynEffect v sig m =
+  ( Has (Reader (DynEnv v)) sig m
+  , Has (State DynState) sig m
   )
 
 type DynEnvEffect v = Reader (DynEnv v)
@@ -77,7 +78,7 @@ mkVDynVar :: (DynValue :< v) => DVar -> Value v -> Value v
 mkVDynVar x def = Fix . inject $ VDynVar x def
 
 projDynVar :: (DynValue :< v) => Value v -> Maybe (DynValue (Value v))
-projDynVar = project @DynValue . unfix
+projDynVar = project @DynValue . unFix
 
 data DynType
   = DTParameter
@@ -108,9 +109,8 @@ instance Pretty DynPrim where
     SetVar -> "SetVar"
 
 instance ( MonadFail m
-         , Member RuntimeErrorEffect sig
-         , WithDynEffect v sig
-         , Carrier sig m
+         , Has RuntimeErrorEffect sig m
+         , WithDynEffect v sig m
          , LambdaValue m :< v
          , BaseValue :< v
          , DynValue :< v

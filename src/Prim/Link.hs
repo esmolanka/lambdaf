@@ -16,13 +16,12 @@ module Prim.Link
   ( LinkPrim(..)
   ) where
 
-import Control.Effect.Carrier
-import Control.Effect.Fail
+import Control.Algebra
 import Control.Monad.IO.Class
 
 import qualified Data.ByteString.Lazy.Char8 as BL8
+import Data.Fix (Fix (..))
 import Data.Functor.Const
-import Data.Functor.Foldable (Fix (..))
 import qualified Data.Map as M
 import Data.Sum
 import qualified Data.Text as T
@@ -50,14 +49,13 @@ instance Pretty LinkPrim where
     Link -> "Link"
 
 instance ( MonadFail m
-         , Member (RuntimeErrorEffect) sig
-         , Member (DynEnvEffect v) sig
-         , Member (DynAllocEffect) sig
-         , Member (EnvEffect v) sig
-         , Member (ExceptionEffect v) sig
-         , Member (KappaEffect) sig
+         , Has (RuntimeErrorEffect) sig m
+         , Has (DynEnvEffect v) sig m
+         , Has (DynAllocEffect) sig m
+         , Has (EnvEffect v) sig m
+         , Has (ExceptionEffect v) sig m
+         , Has (KappaEffect) sig m
          , Apply Pretty1 v
-         , Carrier sig m
          , MonadIO m
          , LambdaValue m :< v
          , DynValue :< v

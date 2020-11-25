@@ -11,10 +11,11 @@ module Syntax.Desugar (desugar) where
 import Prelude hiding (id)
 
 import Control.Arrow (first)
+import Control.Carrier.Reader
 import Control.Monad.Free
-import Control.Effect.Reader
 
-import Data.Functor.Foldable (Fix(..), cata, futu)
+import Data.Fix (Fix(..))
+import Data.Functor.Foldable (cata, futu)
 import qualified Data.Map as M
 import Data.Proxy
 import Data.Text (pack)
@@ -282,8 +283,7 @@ resolvePrimitives expr = run . runReader (primitives (Proxy @p)) $ cata alg expr
   where
     alg :: forall m sig r.
            ( r ~ M.Map Variable (Int, Sum' p)
-           , Member (Reader r) sig
-           , Carrier sig m
+           , Has (Reader r) sig m
            ) => Raw.ExprF t p (m (Raw.Expr t p)) -> m (Raw.Expr t p)
     alg = \case
       Raw.Ref pos var -> do

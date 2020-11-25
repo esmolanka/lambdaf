@@ -30,13 +30,13 @@ module Prim.Kappa
 
 import Prelude hiding ((**))
 
-import Control.Effect.Carrier
-import Control.Effect.Fail
+import Control.Algebra
 import Control.Effect.State
+import Control.Carrier.State.Strict
 import Control.Monad
 
+import Data.Fix (Fix (..))
 import Data.Functor.Const
-import Data.Functor.Foldable (Fix (..), unfix)
 import Data.Sum
 import Data.Text.Prettyprint.Doc as PP
 
@@ -103,12 +103,12 @@ mkVAbs :: (KappaValue :< v) => [EVar] -> EExpr -> Value v
 mkVAbs = ((Fix . inject . VAbs) .) . EAbs
 
 projVal :: (KappaValue :< v) => Value v -> Maybe EValue
-projVal v = case project @KappaValue (unfix v) of
+projVal v = case project @KappaValue (unFix v) of
   Just (VVal e) -> Just e
   _ -> Nothing
 
 projAbs :: (KappaValue :< v) => Value v -> Maybe EAbs
-projAbs v = case project @KappaValue (unfix v) of
+projAbs v = case project @KappaValue (unFix v) of
   Just (VAbs f) -> Just f
   _ -> Nothing
 
@@ -127,9 +127,8 @@ instance Pretty KappaPrim where
 
 instance
   ( MonadFail m
-  , Member RuntimeErrorEffect sig
-  , Member KappaEffect sig
-  , Carrier sig m
+  , Has RuntimeErrorEffect sig m
+  , Has KappaEffect sig m
   , LambdaValue m :< v
   , BaseValue :< v
   , KappaValue :< v
@@ -195,9 +194,8 @@ instance
 
 mkKappa
   :: forall v sig m.
-     ( Member RuntimeErrorEffect sig
-     , Member KappaEffect sig
-     , Carrier sig m
+     ( Has RuntimeErrorEffect sig m
+     , Has KappaEffect sig m
      , LambdaValue m :< v
      , KappaValue :< v
      )
@@ -331,13 +329,13 @@ data EValue
   | EVec  [Double]
   deriving (Show)
 
-fresh :: (Member KappaEffect sig, Carrier sig m) => m EVar
+fresh :: (Has KappaEffect sig m) => m EVar
 fresh = do
   x <- gets freshVar
   modify (\st -> let EVar n = freshVar st in st { freshVar = EVar (succ n) })
   return x
 
-ekappa :: (Member KappaEffect sig, Carrier sig m) => (EVar -> m a) -> m a
+ekappa :: (Has KappaEffect sig m) => (EVar -> m a) -> m a
 ekappa body = do
   modify $ \st -> st
     { focused   = id
@@ -347,7 +345,7 @@ ekappa body = do
   -- traceState $ "EKAPPA"
   body var
 
-eapply :: (Member KappaEffect sig, Carrier sig m) => EPrim -> [EAbs] -> [EValue] -> m EValue
+eapply :: (Has KappaEffect sig m) => EPrim -> [EAbs] -> [EValue] -> m EValue
 eapply p fs xs = do
   var <- fresh
   let entry = ELet var p fs xs
@@ -355,7 +353,7 @@ eapply p fs xs = do
   -- traceState $ "EAPPLY " ++ show p ++ " " ++ show xs ++ " " ++ show fs
   pure (ERef var)
 
-eloop :: (Member KappaEffect sig, Carrier sig m) => (EVar -> m (EValue, a)) -> m a
+eloop :: (Has KappaEffect sig m) => (EVar -> m (EValue, a)) -> m a
 eloop f = do
   EVar n <- fresh
   let eload = ELoad (EVar n) (EPersistent n)
@@ -365,7 +363,7 @@ eloop f = do
   modify $ \st -> st { focused = focused st . estore val }
   pure res
 
-eunkappa :: (Member RuntimeErrorEffect sig, Member KappaEffect sig, Carrier sig m) => m (EExpr -> EExpr)
+eunkappa :: (Has RuntimeErrorEffect sig m, Has KappaEffect sig m) => m (EExpr -> EExpr)
 eunkappa = do
   expr <- gets focused
   rest <- gets unfocused
@@ -374,7 +372,7 @@ eunkappa = do
     (c : cs) -> modify $ \st -> st { focused = c, unfocused = cs }
   pure expr
 
-toEExpr :: (Member RuntimeErrorEffect sig, Member KappaEffect sig, Carrier sig m) => EValue -> m EExpr
+toEExpr :: (Has RuntimeErrorEffect sig m, Has KappaEffect sig m) => EValue -> m EExpr
 toEExpr value = do
   expr <- gets focused
   pure $ expr (EReturn value)

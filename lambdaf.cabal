@@ -40,7 +40,7 @@ library
   build-depends:
     base >= 4.7 && < 5, prettyprinter, containers, transformers-compat,
     text, recursion-schemes, fastsum, fused-effects, sexp-grammar, free,
-    bytestring
+    bytestring, data-fix
     -- For dante-mode in emacs
     , optparse-applicative
 
@@ -53,4 +53,4 @@ executable lf
   build-depends:
     lambdaf, base >= 4.7 && < 5, bytestring, prettyprinter, containers,
     transformers-compat, text, recursion-schemes, fastsum, fused-effects,
-    sexp-grammar, optparse-applicative
+    sexp-grammar, optparse-applicative, data-fix
