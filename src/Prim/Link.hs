@@ -88,8 +88,7 @@ instance ( MonadFail m
 instance (BaseType :<< t) => TypePrim t (Const LinkPrim) where
   typePrim = \case
     Const Link ->
-      forall Star $ \a ->
       mono $
         typeCtor BTText ~>
         Fix TUnit ~>
-        a
+        typeCtor BTFloat

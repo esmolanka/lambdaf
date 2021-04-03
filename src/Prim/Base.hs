@@ -20,7 +20,6 @@ module Prim.Base
   , mkVUnit
   , projBase
   , BasePrim(..)
-  , partialEff
   , BaseType(..)
   , typeListOf
   , typePairOf
@@ -237,9 +236,6 @@ instance ( Has RuntimeErrorEffect sig m
         case projLambda l of
           Just f -> f mkVUnit
           Nothing -> evalError "Cannot force a non-lambda"
-
-partialEff :: Label
-partialEff = Label (T.pack "partial")
 
 instance (BaseType :<< t) => TypePrim t (Const BasePrim) where
   typePrim = \case

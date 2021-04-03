@@ -69,19 +69,19 @@ isMono = getAll . cata alg
       other -> fold other
 
 data CtxMember t
-  = CtxVar    TVar
-  | CtxAssump Variable (Type t)
-  | CtxMeta   MetaVar
-  | CtxSolved MetaVar (Type t)
-  | CtxMarker MetaVar
+  = CtxVar    TVar              -- skolem:       α : κ
+  | CtxAssump Variable (Type t) -- assumption:   x : τ
+  | CtxMeta   MetaVar           -- meta var.:   'α : κ
+  | CtxSolved MetaVar (Type t)  -- solved meta: 'α : κ = τ
+  | CtxMarker MetaVar           -- marker:      ⟨'α⟩
 
 instance Eq (CtxMember t) where
-  CtxVar x == CtxVar y = x == y
+  CtxVar x      == CtxVar y      = x == y
   CtxAssump x _ == CtxAssump y _ = x == y
-  CtxMeta x == CtxMeta y = x == y
+  CtxMeta x     == CtxMeta y     = x == y
   CtxSolved x _ == CtxSolved y _ = x == y
-  CtxMarker x == CtxMarker y = x == y
-  _ == _ = False
+  CtxMarker x   == CtxMarker y   = x == y
+  _             == _             = False
 
 newtype Ctx t = Ctx (Seq (CtxMember t))
   deriving (Semigroup, Monoid)
@@ -95,7 +95,7 @@ ppCtx (Ctx elems) = indent 2 . vsep . map ppMember . toList $ elems
       CtxAssump v ty  -> "assump" <+> ppVariable v <+> ":" <+> ppType ty
       CtxMeta ev      -> "unsolv" <+> ppMetaVar ev
       CtxSolved ev ty -> "solved" <+> ppMetaVar ev <+> "=" <+> ppType ty
-      CtxMarker ev    -> "marker" <+> "▸" <> ppMetaVar ev
+      CtxMarker ev    -> "marker" <+> "⟨" <> ppMetaVar ev <> "⟩"
 
 (▸) :: Ctx t -> CtxMember t -> Ctx t
 (Ctx ctx) ▸ mem = Ctx (ctx :|> mem)
@@ -300,7 +300,7 @@ freshMeta _ k = do
     TVoid ≤· TVoid = pure ()
 
     TPresent ≤· TPresent = pure ()
-    TAbsent ≤· TAbsent = pure ()
+    TAbsent  ≤· TAbsent = pure ()
 
     TRowEmpty ≤· TRowEmpty = pure ()
     TRowExtend lbl pty fty tail_ ≤· TRowExtend lbl' pty' fty' tail' = do

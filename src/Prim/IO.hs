@@ -12,7 +12,6 @@
 
 module Prim.IO
   ( IOPrim(..)
-  , ioEff
   ) where
 
 import Control.Algebra
@@ -21,7 +20,6 @@ import Control.Monad.IO.Class
 import Data.Fix (Fix (..))
 import Data.Functor.Const
 import Data.Sum
-import qualified Data.Text as T
 import qualified Data.Text.IO as T
 
 import Eval
@@ -60,9 +58,6 @@ instance ( Has RuntimeErrorEffect sig m
               liftIO $ T.putStrLn t
               pure $ mkVUnit
             _ -> evalError "WriteLn: cannot print non-text"
-
-ioEff :: Label
-ioEff = Label (T.pack "io")
 
 instance (BaseType :<< t) => TypePrim t (Const IOPrim) where
   typePrim = \case

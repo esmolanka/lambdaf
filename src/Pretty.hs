@@ -93,8 +93,8 @@ ppType' lvl = spine >>> \case
   where
     ppTypeCon :: Int -> TypeF t (Type t) -> Doc ann
     ppTypeCon lvl = \case
-      TUnit      -> "unit"
-      TVoid      -> "void"
+      TUnit      -> "()"
+      TVoid      -> "Void"
       TRef tv    -> ppTyVar tv
       TMeta tv   -> ppMetaVar tv
 
@@ -206,10 +206,10 @@ ppExpr = run . runReader @Int 0 . para alg
       Let _ x (_, e) (_, b) -> do
         n <- ask @Int
         e' <- local @Int (const 1) $ e
-        b' <- local @Int (const 1) $ b
+        b' <- local @Int (const 0) $ b
         pure $ parensIf (n > 0) $ group $ align $ vsep
-          [ "let" <+> ppVariable x <+> "=" <+> nest 6 (group e')
-          , "in" <+> align b'
+          [ "let" <+> ppVariable x <+> "=" <+> nest 6 (group e') <> ";"
+          , b'
           ]
       Annot _ (_, b) t -> do
         b' <- local @Int (const 0) b
