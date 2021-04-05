@@ -173,8 +173,8 @@ instance
       pure $ mkVLam @m $ \t ->
       pure $ mkVLam @m $ \f -> do
         c' <- maybe (evalError "EBranch: c") pure $ projVal c
-        t' <- maybe (evalError "EBranch: c") pure $ projVal t
-        f' <- maybe (evalError "EBranch: c") pure $ projVal f
+        t' <- maybe (evalError "EBranch: t") pure $ projVal t
+        f' <- maybe (evalError "EBranch: f") pure $ projVal f
         mkVVal <$> eapply EBranch [] [c', t', f']
 
     Const (KPrim prim) ->

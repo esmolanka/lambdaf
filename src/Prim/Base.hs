@@ -179,12 +179,10 @@ instance ( Has RuntimeErrorEffect sig m
       Const If ->
         pure $ mkVLam @m $ \c ->
         pure $ mkVLam @m $ \t ->
-        pure $ mkVLam @m $ \f ->
+        pure $ mkVLam @m $ \f -> do
           case projBase c of
-            Just (VFloat c')
-              | c' > 0    -> forceDelayed t
-              | otherwise -> forceDelayed f
-            _ -> evalError "Condition is not a double!"
+            Just (VBool c') -> if c' then forceDelayed t else forceDelayed f
+            _ -> evalError "If expects a bool"
 
       Const Delay ->
         pure $ mkVLam @m $ \f ->
@@ -251,7 +249,7 @@ instance (BaseType :<< t) => TypePrim t (Const BasePrim) where
     Const If ->
       forall Star $ \a ->
       mono $
-        typeCtor BTFloat ~> (Fix TUnit ~> a) ~> (Fix TUnit ~> a) ~> a
+        typeCtor BTBool ~> (Fix TUnit ~> a) ~> (Fix TUnit ~> a) ~> a
     Const Delay ->
       forall Star $ \a ->
       mono $
