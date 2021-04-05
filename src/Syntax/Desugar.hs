@@ -115,13 +115,15 @@ desugar = resolvePrimitives . futu coalg
                (Pure e)
                (reverse es)
 
-      Fix (MkRec pos elems) ->
-        let empty = Raw.Prim (dsPos pos) (inject' Raw.RecordNil)
+      Fix (MkRec pos elems tail') ->
+        let tail_ = case tail' of
+              Nothing -> Free $ Raw.Prim (dsPos pos) (inject' Raw.RecordNil)
+              Just sugared -> Pure sugared
             ext lbl p r = Raw.App (dsPos pos) (Free (Raw.App (dsPos pos) (Free (Raw.Prim (dsPos pos) (inject' (Raw.RecordExtend lbl)))) p)) r
         in unFree $
              foldr
                (\(lbl, e) rest_ -> Free $ ext lbl (Pure e) rest_)
-               (Free empty)
+               tail_
                elems
 
       Fix (RecProj pos label record) ->
@@ -132,11 +134,6 @@ desugar = resolvePrimitives . futu coalg
       Fix (RecDef pos label record def) ->
         Raw.App (dsPos pos)
           (Free (Raw.App (dsPos pos) (Free (Raw.Prim (dsPos pos) (inject' (Raw.RecordDefault label)))) (Pure def)))
-          (Pure record)
-
-      Fix (RecExt pos label record payload) ->
-        Raw.App (dsPos pos)
-          (Free (Raw.App (dsPos pos) (Free (Raw.Prim (dsPos pos) (inject' (Raw.RecordExtend label)))) (Pure payload)))
           (Pure record)
 
       Fix (MkVnt pos lbl) ->

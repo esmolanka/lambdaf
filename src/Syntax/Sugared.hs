@@ -50,10 +50,9 @@ data SugaredF e
   | If      Position e e e
   | MkList  Position [e]
   | MkTuple Position e e [e]
-  | MkRec   Position [(Label, e)]
+  | MkRec   Position [(Label, e)] (Maybe e)
   | RecProj Position Label e
   | RecDef  Position Label e e
-  | RecExt  Position Label e e
   | MkVnt   Position Label
   | Case    Position e [VariantMatchLeg e]
   | Delay   Position e

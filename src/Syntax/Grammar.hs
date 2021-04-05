@@ -19,6 +19,7 @@ import Control.Category (id)
 import Data.Char (isUpper)
 import Data.Coerce
 import Data.Fix (Fix (..))
+import Data.Maybe (isNothing)
 import Data.Text (Text, uncons)
 
 import Language.SexpGrammar
@@ -33,8 +34,17 @@ import Syntax.Sugared
 
 reservedWords :: [Text]
 reservedWords =
-  [ "lambda", "let", "if", "case", "catch", "prev"
-  , "do", "loop", "=", "<-", "**", "tt", "ff"
+  [ -- reserved for later
+    "define", "->", "forall", "exists"
+
+    -- built-in constructors
+  , "true", "false", "**"
+
+    -- control flow
+  , "lambda", "let", "if", "case", "do", "<-"
+
+    -- misc
+  , "catch", "prev", "loop", "|"
   ]
 
 {-# NOINLINE varGrammar #-}
@@ -112,12 +122,12 @@ variantMatchLegGrammar = match
 boolGrammar :: Grammar Position (Sexp :- t) (Bool :- t)
 boolGrammar = symbol >>> partialOsi
   (\case
-      "tt" -> Right True
-      "ff" -> Right False
+      "true" -> Right True
+      "false" -> Right False
       other -> Left $ expected "bool" <> unexpected ("symbol " <> other))
   (\case
-      True -> "tt"
-      False -> "ff")
+      True -> "true"
+      False -> "false")
 
 
 {-# NOINLINE litGrammar #-}
@@ -213,7 +223,11 @@ sugaredGrammar = fixG $ match
                  restKeys (
                    sugaredGrammar >>>
                    onTail (iso coerce coerce) >>>
-                   pair))) >>>
+                   pair)) >>>
+               ( (el (sym "|") >>> el (sugaredGrammar >>> partialIso Just (\case {Just a -> pure a; Nothing -> Left (expected "just")})))
+               <> onTail (push Nothing isNothing (\_ -> expected "nothing"))
+               )
+             ) >>>
              mkrec)
 
   $ With (\recprj ->
@@ -235,17 +249,6 @@ sugaredGrammar = fixG $ match
                el (sym ":default") >>>
                el sugaredGrammar) >>>
              recdef)
-
-  $ With (\recext ->
-             annotated "record extension" $
-             position >>>
-             swap >>>
-             list (
-               el labelGrammar >>>
-               el sugaredGrammar >>>
-               el (sym "=") >>>
-               el sugaredGrammar) >>>
-             recext)
 
   $ With (\mkvnt ->
              annotated "variant constructor" $
